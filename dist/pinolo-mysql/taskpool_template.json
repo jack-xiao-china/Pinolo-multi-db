@@ -1,0 +1,15 @@
+{
+  "outputPath": "./output",
+  "dbms": "mysql",
+  "host": "localhost",
+  "port": 3306,
+  "username": "root",
+  "password": "your_password",
+  "dbPrefix": "TEST_POOL",
+  "seed": 0,
+  "ddlPath": "./test_ddl.sql",
+  "dmlPath": "./test_dml.sql",
+  "threadNum": 4,
+  "maxTasks": 8,
+  "maxTimeS": 60
+}

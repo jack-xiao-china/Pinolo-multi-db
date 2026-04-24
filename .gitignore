@@ -1,0 +1,43 @@
+# Binaries
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Test binary
+*.test
+
+# Go coverage
+*.out
+
+# Go workspace
+go.work
+
+# Dependency directories
+vendor/
+
+# Output directory
+output/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+
+# Temporary files
+*.tmp
+*.temp
+
+# Sensitive configuration files (contain passwords)
+resources/gaussdb_a_task.json
+resources/gaussdb_m_task.json
+resources/opengauss_m_task.json

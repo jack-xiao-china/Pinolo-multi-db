@@ -1,0 +1,13 @@
+{
+  "outputPath": "./output",
+  "dbms": "mysql",
+  "taskId": 1,
+  "host": "localhost",
+  "port": 3306,
+  "username": "tpcc",
+  "password": "Taurus@123",
+  "dbname": "TEST_PINOLO",
+  "seed": 0,
+  "ddlPath": "./test_ddl.sql",
+  "dmlPath": "./test_dml.sql"
+}
