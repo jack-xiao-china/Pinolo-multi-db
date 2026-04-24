@@ -1,4 +1,4 @@
-# Binaries
+# Binaries for programs and plugins
 *.exe
 *.exe~
 *.dll
@@ -36,6 +36,14 @@ Thumbs.db
 # Temporary files
 *.tmp
 *.temp
+
+# Generated SQL files
+dml.sql
+ddl.sql
+output.sql
+
+# Main binary
+impomysql
 
 # Sensitive configuration files (contain passwords)
 resources/gaussdb_a_task.json
