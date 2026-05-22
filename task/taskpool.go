@@ -30,6 +30,8 @@ type TaskPoolConfig struct {
 	ThreadNum   int    `json:"threadNum"`
 	MaxTasks    int    `json:"maxTasks"` // <= 0: no limit
 	MaxTimeS    int    `json:"maxTimeS"` // <= 0: no limit
+	DDLPath     string `json:"ddlPath"` // for PostgreSQL/GaussDB
+	DMLPath     string `json:"dmlPath"` // for PostgreSQL/GaussDB
 }
 
 // TaskPoolConfig.GetTaskPoolPath:
@@ -73,20 +75,43 @@ func InitTaskPoolConfig(config *TaskPoolConfig) (*TaskPoolConfig, error) {
 	if config.Seed <= 0 {
 		config.Seed = time.Now().UnixNano()
 	}
-	if config.RandGenPath == "" {
-		return nil, errors.New("[InitTaskPoolConfig]empty randGenPath")
-	}
-	if config.ZZPath == "" {
-		return nil, errors.New("[InitTaskPoolConfig]empty zzPath")
-	}
-	if config.YYPath == "" {
-		return nil, errors.New("[InitTaskPoolConfig]empty yyPath")
-	}
-	if config.QueriesNum <= 0 {
-		return nil, errors.New("[InitTaskPoolConfig]queriesNum <= 0")
-	}
 	if config.ThreadNum <= 0 {
 		return nil, errors.New("[InitTaskPoolConfig]threadNum <= 0")
+	}
+
+	// PostgreSQL/GaussDB use DDLPath + DMLPath instead of randgen
+	switch config.DBMS {
+	case "postgresql":
+		if config.DDLPath == "" {
+			return nil, errors.New("[InitTaskPoolConfig]empty ddlPath for PostgreSQL")
+		}
+		p, err := filepath.Abs(config.DDLPath)
+		if err != nil {
+			return nil, errors.Wrap(err, "[InitTaskPoolConfig]ddlPath abs error")
+		}
+		config.DDLPath = p
+		if config.DMLPath == "" {
+			return nil, errors.New("[InitTaskPoolConfig]empty dmlPath for PostgreSQL")
+		}
+		p, err = filepath.Abs(config.DMLPath)
+		if err != nil {
+			return nil, errors.Wrap(err, "[InitTaskPoolConfig]dmlPath abs error")
+		}
+		config.DMLPath = p
+	default:
+		// MySQL/randgen mode
+		if config.RandGenPath == "" {
+			return nil, errors.New("[InitTaskPoolConfig]empty randGenPath")
+		}
+		if config.ZZPath == "" {
+			return nil, errors.New("[InitTaskPoolConfig]empty zzPath")
+		}
+		if config.YYPath == "" {
+			return nil, errors.New("[InitTaskPoolConfig]empty yyPath")
+		}
+		if config.QueriesNum <= 0 {
+			return nil, errors.New("[InitTaskPoolConfig]queriesNum <= 0")
+		}
 	}
 	return config, nil
 }
@@ -290,4 +315,169 @@ func PrepareAndRunTask(config *TaskPoolConfig, logger *logrus.Logger, connPool *
 	taskPoolResult.lock.Unlock()
 
 	logger.Info("task", taskId, " Finished")
+}
+
+// RunTaskPoolForPostgreSQL: PostgreSQL TaskPool runner
+// Uses PgConnectorPool for parallel testing with isolated databases
+func RunTaskPoolForPostgreSQL(config *TaskPoolConfig) (*TaskPoolResult, error) {
+	startTime := time.Now()
+
+	// 1.1 init TaskPoolConfig.GetTaskPoolPath()
+	_ = os.RemoveAll(config.GetTaskPoolPath())
+	_ = os.MkdirAll(config.GetTaskPoolPath(), 0777)
+
+	// 1.2 create logger
+	loggerPath := path.Join(config.GetTaskPoolPath(), "taskpool.log")
+	logger := logrus.New()
+	logger.SetFormatter(&logrus.TextFormatter{
+		DisableColors: true,
+		FullTimestamp: true,
+	})
+	file, err := os.OpenFile(loggerPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0777)
+	if err != nil {
+		return nil, errors.Wrap(err, "[RunTaskPoolForPostgreSQL]create logger error")
+	}
+	defer file.Close()
+	writers := []io.Writer{file, os.Stdout}
+	multiWriter := io.MultiWriter(writers...)
+	logger.SetOutput(multiWriter)
+	logger.SetLevel(logrus.InfoLevel)
+
+	// 1.3 create PostgreSQL connector pool
+	connPool, err := connector.NewPgConnectorPool(config.Host, config.Port, config.Username, config.Password,
+		config.DbPrefix, config.ThreadNum)
+	if err != nil {
+		logger.Error("create PostgreSQL connector pool error: " + err.Error())
+		return nil, err
+	}
+
+	// 2. run
+	logger.Info("Running **************************************************")
+	taskPoolResult := &TaskPoolResult{
+		StartTime:       startTime.String(),
+		TotalTaskNum:    0,
+		FinishedTaskNum: 0,
+		ErrorTaskNum:    0,
+		ErrorTaskIds:    make([]int, 0),
+		BugsNum:         0,
+		BugTaskIds:      make([]int, 0),
+		EndTime:         "",
+	}
+
+	for {
+		conn := connPool.WaitForFree()
+
+		// max time limit
+		if config.MaxTimeS > 0 && time.Since(startTime) >= time.Duration(config.MaxTimeS)*time.Second {
+			logger.Info("max time!")
+			connPool.BackToPool(conn)
+			break
+		}
+		// max task limit
+		finishedTaskNum := 0
+		taskPoolResult.lock.Lock()
+		finishedTaskNum = taskPoolResult.FinishedTaskNum
+		taskPoolResult.lock.Unlock()
+		if config.MaxTasks > 0 && finishedTaskNum >= config.MaxTasks {
+			logger.Info("max tasks!")
+			connPool.BackToPool(conn)
+			break
+		}
+
+		// execute a new task
+		taskId := taskPoolResult.TotalTaskNum
+		taskPoolResult.TotalTaskNum += 1
+
+		result := conn.ExecSQL("SELECT 1")
+		if result.Err != nil {
+			logger.Error("task", taskId, " connector "+conn.DbName+" SELECT 1 failed: ", result.Err)
+			connPool.BackToPool(conn)
+			break
+		} else {
+			go PrepareAndRunTaskForPostgreSQL(config, logger, connPool, conn, taskPoolResult, taskId)
+		}
+	}
+
+	taskPoolResult.EndTime = time.Now().String()
+	err = taskPoolResult.SaveTaskPoolResult(config.GetTaskPoolPath())
+	if err != nil {
+		logger.Error("[Save Result Error] ", err)
+	}
+
+	logger.Info("Finished **************************************************")
+	connPool.Close()
+	return taskPoolResult, nil
+}
+
+// PrepareAndRunTaskForPostgreSQL: create task config and run for PostgreSQL
+func PrepareAndRunTaskForPostgreSQL(config *TaskPoolConfig, logger *logrus.Logger,
+	connPool *connector.PgConnectorPool, conn *connector.PostgreSQLConnector,
+	taskPoolResult *TaskPoolResult, taskId int) {
+
+	defer func() {
+		taskPoolResult.lock.Lock()
+		taskPoolResult.FinishedTaskNum += 1
+		taskPoolResult.lock.Unlock()
+		connPool.BackToPool(conn)
+	}()
+
+	logger.Info("Run task", taskId)
+
+	// 1. create and save task config
+	taskConfig := &TaskConfig{
+		OutputPath: config.OutputPath,
+		DBMS:       config.DBMS,
+		TaskId:     taskId,
+		Host:       conn.Host,
+		Port:       conn.Port,
+		Username:   conn.Username,
+		Password:   conn.Password,
+		DbName:     conn.DbName,
+		Seed:       config.Seed + int64(taskId),
+		DDLPath:    config.DDLPath,
+		DMLPath:    config.DMLPath,
+		NeedDML:    false,
+	}
+	taskConfig, err := InitTaskConfig(taskConfig)
+	if err != nil {
+		logger.Error("task", taskId, " init task config error: ", err)
+		return
+	}
+	err = taskConfig.SaveConfig(config.GetTaskPoolPath())
+	if err != nil {
+		logger.Error("task", taskId, " save task config error: ", err)
+		return
+	}
+
+	// 2. run task
+	taskResult, err := RunTaskPostgreSQL(taskConfig, conn, logger)
+	if err != nil {
+		taskPoolResult.lock.Lock()
+		taskPoolResult.ErrorTaskNum += 1
+		taskPoolResult.ErrorTaskIds = append(taskPoolResult.ErrorTaskIds, taskId)
+		taskPoolResult.lock.Unlock()
+		logger.Error("task", taskId, " run task error: ", err)
+		return
+	}
+	taskPoolResult.lock.Lock()
+	bugsNum := taskResult.ImpoBugsNum
+	if bugsNum > 0 {
+		taskPoolResult.BugsNum += bugsNum
+		taskPoolResult.BugTaskIds = append(taskPoolResult.BugTaskIds, taskId)
+	}
+	taskPoolResult.lock.Unlock()
+
+	logger.Info("task", taskId, " Finished")
+}
+
+// RunTaskPoolUniversal: Universal TaskPool runner supporting multiple database types
+func RunTaskPoolUniversal(config *TaskPoolConfig) (*TaskPoolResult, error) {
+	switch config.DBMS {
+	case "mysql", "mariadb", "tidb", "oceanbase":
+		return RunTaskPool(config)
+	case "postgresql":
+		return RunTaskPoolForPostgreSQL(config)
+	default:
+		return nil, errors.New("unsupported database type for taskpool: " + config.DBMS)
+	}
 }

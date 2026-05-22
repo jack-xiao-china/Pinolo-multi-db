@@ -15,15 +15,17 @@ import (
 	"time"
 )
 
-// RunTaskGaussDB: Run task for GaussDB/openGauss M mode
-// Uses PostgreSQL protocol with pgx driver
-func RunTaskGaussDB(config *TaskConfig, publicLogger *logrus.Logger) (*TaskResult, error) {
+// RunTaskPostgreSQL: Run task for native PostgreSQL database
+// Uses pgx/v5 driver and pg_query_go parser
+// If publicConn is provided, use it instead of creating a new one
+func RunTaskPostgreSQL(config *TaskConfig, publicConn *connector.PostgreSQLConnector, publicLogger *logrus.Logger) (*TaskResult, error) {
 	// 1 init
 	startTime := time.Now().String()
-	// **************************************************
+
 	// 1.1 init TaskConfig.GetTaskPath()
 	_ = os.RemoveAll(config.GetTaskPath())
 	_ = os.MkdirAll(config.GetTaskPath(), 0777)
+
 	// 1.2 create logger
 	loggerPath := path.Join(config.GetTaskPath(), "task.log")
 	logger := logrus.New()
@@ -33,7 +35,7 @@ func RunTaskGaussDB(config *TaskConfig, publicLogger *logrus.Logger) (*TaskResul
 	})
 	file, err := os.OpenFile(loggerPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0777)
 	if err != nil {
-		return nil, errors.Wrap(err, "[RunTaskGaussDB]create logger error")
+		return nil, errors.Wrap(err, "[RunTaskPostgreSQL]create logger error")
 	}
 	defer file.Close()
 	writers := []io.Writer{file}
@@ -41,28 +43,35 @@ func RunTaskGaussDB(config *TaskConfig, publicLogger *logrus.Logger) (*TaskResul
 	logger.SetOutput(multiWriter)
 	logger.SetLevel(logrus.InfoLevel)
 
-	// 1.3 create connector for GaussDB-M
-	logger.Info("create GaussDB connector (dbms: ", config.DBMS, ")")
-	conn, err := connector.NewOpenGaussConnector(config.Host, config.Port, config.Username, config.Password, config.DbName)
-	if err != nil {
-		logger.Error("create connector error: " + err.Error())
-		return nil, err
+	// 1.3 create PostgreSQL connector
+	var conn *connector.PostgreSQLConnector = nil
+	if publicConn == nil {
+		logger.Info("create PostgreSQL connector")
+		conn, err = connector.NewPostgreSQLConnector(config.Host, config.Port, config.Username, config.Password, config.DbName)
+		if err != nil {
+			logger.Error("create connector error: " + err.Error())
+			return nil, err
+		}
+	} else {
+		logger.Info("use public PostgreSQL connector")
+		conn = publicConn
 	}
 
-	// 1.5 read ddl, execute ddl (no InitDB for GaussDB)
+	// 1.5 read ddl, execute ddl
 	logger.Info("init ddl")
 	ddlData, err := ioutil.ReadFile(config.DDLPath)
 	if err != nil {
 		logger.Error("read ddl error: " + err.Error())
-		return nil, errors.Wrap(err, "[RunTaskGaussDB]read ddl error")
+		return nil, errors.Wrap(err, "[RunTaskPostgreSQL]read ddl error")
 	}
 	ddlSqls := connector.ExtractSQL(string(ddlData))
-	// Execute DDL directly (database already exists in M mode)
+
+	// Execute DDL (database should already exist)
 	for _, ddlSql := range ddlSqls {
 		result := conn.ExecSQL(ddlSql.Sql)
 		if result.Err != nil {
 			logger.Error("ddl exec error: " + result.Err.Error() + " sql: " + ddlSql.Sql)
-			// Continue for some errors (e.g., DROP TABLE IF EXISTS when table doesn't exist)
+			// Continue for ignorable errors (e.g., DROP TABLE IF EXISTS)
 		}
 	}
 
@@ -71,12 +80,11 @@ func RunTaskGaussDB(config *TaskConfig, publicLogger *logrus.Logger) (*TaskResul
 	dmlData, err := ioutil.ReadFile(config.DMLPath)
 	if err != nil {
 		logger.Error("read dml error: " + err.Error())
-		return nil, errors.Wrap(err, "[RunTaskGaussDB]read dml error")
+		return nil, errors.Wrap(err, "[RunTaskPostgreSQL]read dml error")
 	}
 	dmlSqls := connector.ExtractSQL(string(dmlData))
-	// **************************************************
+
 	endInitTime := time.Now().String()
-	// end 1
 
 	// 2. run
 	logger.Info("Running **************************************************")
@@ -87,6 +95,7 @@ func RunTaskGaussDB(config *TaskConfig, publicLogger *logrus.Logger) (*TaskResul
 		EndInitTime:            endInitTime,
 		Stage1ErrNum:           0,
 		Stage1ExecErrNum:       0,
+		Stage1SkippedNum:       0,
 		Stage2ErrNum:           0,
 		Stage2UnitNum:          0,
 		Stage2UnitErrNum:       0,
@@ -95,7 +104,7 @@ func RunTaskGaussDB(config *TaskConfig, publicLogger *logrus.Logger) (*TaskResul
 		SaveBugErrNum:          0,
 		EndTime:                "",
 	}
-	// **************************************************
+
 	// for each sql, do:
 	total := len(dmlSqls)
 	cur := 0
@@ -109,8 +118,8 @@ func RunTaskGaussDB(config *TaskConfig, publicLogger *logrus.Logger) (*TaskResul
 			cur += 1
 		}
 
-		// 2.1 stage1.InitAndExec
-		stage1Result := stage1.InitAndExec(dmlSql.Sql, conn)
+		// 2.1 stage1.InitForPostgreSQLAndExec
+		stage1Result := stage1.InitForPostgreSQLAndExec(dmlSql.Sql, conn)
 		// handle stage1 error
 		if stage1Result.Err != nil {
 			taskResult.Stage1ErrNum += 1
@@ -125,13 +134,14 @@ func RunTaskGaussDB(config *TaskConfig, publicLogger *logrus.Logger) (*TaskResul
 		originalSql := stage1Result.InitSql
 		originalResult := stage1Result.ExecResult
 
-		// 2.2 stage2.MutateAllAndExec
-		stage2Result := stage2.MutateAllAndExec(originalSql, config.Seed+int64(i), conn)
+		// 2.2 stage2.MutateAllAndExecForPostgreSQL
+		stage2Result := stage2.MutateAllAndExecForPostgreSQL(originalSql, config.Seed+int64(i), conn)
 		// handle stage2 error
 		if stage2Result.Err != nil {
 			taskResult.Stage2ErrNum += 1
 			continue
 		}
+
 		// for each mutation unit
 		taskResult.Stage2UnitNum += len(stage2Result.MutateUnits)
 		for _, mutateUnit := range stage2Result.MutateUnits {
@@ -151,7 +161,7 @@ func RunTaskGaussDB(config *TaskConfig, publicLogger *logrus.Logger) (*TaskResul
 			mutatedSql := mutateUnit.Sql
 			mutatedResult := mutateUnit.ExecResult
 
-			//   2.3 use oracle.Check to detect logical bugs
+			// 2.3 use oracle.Check to detect logical bugs
 			check, err := oracle.Check(originalResult, mutatedResult, isUpper)
 			if err != nil {
 				return nil, err
@@ -187,34 +197,20 @@ func RunTaskGaussDB(config *TaskConfig, publicLogger *logrus.Logger) (*TaskResul
 			}
 		}
 	}
+
 	// 2.4 save task result
 	taskResult.EndTime = time.Now().String()
 	err = taskResult.SaveTaskResult(config.GetTaskPath())
 	if err != nil {
 		logger.Error("[Save Result Error] ", err)
 	}
-	// **************************************************
+
 	logger.Info("Finished **************************************************")
 
-	// Close connection
-	conn.Close()
+	// Close connection only if we created it
+	if publicConn == nil {
+		conn.Close()
+	}
 
 	return taskResult, nil
-}
-
-// RunTaskUniversal: Universal task runner supporting multiple database types
-func RunTaskUniversal(config *TaskConfig, publicLogger *logrus.Logger) (*TaskResult, error) {
-	// Determine database type and call appropriate function
-	switch config.DBMS {
-	case "mysql", "mariadb", "tidb", "oceanbase":
-		return RunTask(config, nil, publicLogger)
-	case "postgresql":
-		return RunTaskPostgreSQL(config, nil, publicLogger)
-	case "opengauss_m", "gaussdb_m":
-		return RunTaskGaussDB(config, publicLogger)
-	case "opengauss_a", "gaussdb_a":
-		return RunTaskGaussDBA(config, publicLogger)
-	default:
-		return nil, errors.New("unsupported database type: " + config.DBMS)
-	}
 }

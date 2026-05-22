@@ -1,0 +1,15 @@
+{
+  "outputPath": "./output",
+  "dbms": "postgresql",
+  "host": "localhost",
+  "port": 5432,
+  "username": "your_username",
+  "password": "your_password",
+  "dbPrefix": "pgtest_",
+  "seed": 0,
+  "threadNum": 4,
+  "maxTasks": 100,
+  "maxTimeS": 3600,
+  "ddlPath": "./resources/postgresql_ddl.sql",
+  "dmlPath": "./resources/postgresql_dml.sql"
+}

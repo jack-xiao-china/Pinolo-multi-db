@@ -1,14 +1,14 @@
 package connector
 
 import (
-	"context"
+	"database/sql"
 	"fmt"
-	"github.com/jackc/pgx/v5"
 	"github.com/pkg/errors"
+	_ "gitee.com/opengauss/openGauss-connector-go-pq"
 )
 
 // GaussDBAConnector: connect to GaussDB/openGauss A mode (Oracle compatibility)
-// Uses PostgreSQL protocol with pgx driver
+// Uses openGauss-connector-go-pq driver for SHA256 authentication support
 // Database should be created with: CREATE DATABASE dbname WITH DBCOMPATIBILITY 'A'
 type GaussDBAConnector struct {
 	Host     string
@@ -16,17 +16,23 @@ type GaussDBAConnector struct {
 	Username string
 	Password string
 	DbName   string
-	conn     *pgx.Conn
+	db       *sql.DB
 }
 
 // NewGaussDBAConnector: create GaussDBAConnector for A mode
 func NewGaussDBAConnector(host string, port int, username string, password string, dbname string) (*GaussDBAConnector, error) {
-	connString := fmt.Sprintf("postgres://%s:%s@%s:%d/%s?sslmode=disable",
-		username, password, host, port, dbname)
+	connStr := fmt.Sprintf("host=%s port=%d user=%s password=%s dbname=%s sslmode=disable",
+		host, port, username, password, dbname)
 
-	conn, err := pgx.Connect(context.Background(), connString)
+	db, err := sql.Open("opengauss", connStr)
 	if err != nil {
-		return nil, errors.Wrap(err, "[NewGaussDBAConnector]connect error")
+		return nil, errors.Wrap(err, "[NewGaussDBAConnector]sql.Open error")
+	}
+
+	// Test connection
+	err = db.Ping()
+	if err != nil {
+		return nil, errors.Wrap(err, "[NewGaussDBAConnector]ping error")
 	}
 
 	gaConn := &GaussDBAConnector{
@@ -35,14 +41,14 @@ func NewGaussDBAConnector(host string, port int, username string, password strin
 		Username: username,
 		Password: password,
 		DbName:   dbname,
-		conn:     conn,
+		db:       db,
 	}
 
 	return gaConn, nil
 }
 
 // ExecSQL: execute SQL and return result
-func (gaConn *GaussDBAConnector) ExecSQL(sql string) *Result {
+func (gaConn *GaussDBAConnector) ExecSQL(sqlStr string) *Result {
 	result := &Result{
 		ColumnNames: make([]string, 0),
 		ColumnTypes: make([]string, 0),
@@ -50,7 +56,7 @@ func (gaConn *GaussDBAConnector) ExecSQL(sql string) *Result {
 		Err:         nil,
 	}
 
-	rows, err := gaConn.conn.Query(context.Background(), sql)
+	rows, err := gaConn.db.Query(sqlStr)
 	if err != nil {
 		result.Err = errors.Wrap(err, "[GaussDBAConnector.ExecSQL]query error")
 		return result
@@ -58,21 +64,39 @@ func (gaConn *GaussDBAConnector) ExecSQL(sql string) *Result {
 	defer rows.Close()
 
 	// Get column info
-	fieldDescriptions := rows.FieldDescriptions()
-	for _, fd := range fieldDescriptions {
-		result.ColumnNames = append(result.ColumnNames, string(fd.Name))
-		result.ColumnTypes = append(result.ColumnTypes, fmt.Sprintf("OID_%d", fd.DataTypeOID))
+	columns, err := rows.Columns()
+	if err != nil {
+		result.Err = errors.Wrap(err, "[GaussDBAConnector.ExecSQL]get columns error")
+		return result
+	}
+	result.ColumnNames = columns
+
+	// Get column types
+	columnTypes, err := rows.ColumnTypes()
+	if err != nil {
+		result.Err = errors.Wrap(err, "[GaussDBAConnector.ExecSQL]get column types error")
+		return result
+	}
+	for _, ct := range columnTypes {
+		result.ColumnTypes = append(result.ColumnTypes, ct.DatabaseTypeName())
 	}
 
 	// Scan rows
 	for rows.Next() {
-		values, err := rows.Values()
+		// Create values slice for scanning
+		values := make([]interface{}, len(columns))
+		valuePtrs := make([]interface{}, len(columns))
+		for i := range values {
+			valuePtrs[i] = &values[i]
+		}
+
+		err := rows.Scan(valuePtrs...)
 		if err != nil {
-			result.Err = errors.Wrap(err, "[GaussDBAConnector.ExecSQL]scan values error")
+			result.Err = errors.Wrap(err, "[GaussDBAConnector.ExecSQL]scan error")
 			return result
 		}
 
-		rowData := make([]string, len(values))
+		rowData := make([]string, len(columns))
 		for i, v := range values {
 			if v == nil {
 				rowData[i] = "NULL"
@@ -112,7 +136,7 @@ func (gaConn *GaussDBAConnector) InitDBWithDDL(ddlSqls []*EachSql) error {
 
 // Close: close connection
 func (gaConn *GaussDBAConnector) Close() {
-	if gaConn.conn != nil {
-		gaConn.conn.Close(context.Background())
+	if gaConn.db != nil {
+		gaConn.db.Close()
 	}
 }

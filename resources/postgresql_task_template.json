@@ -1,0 +1,13 @@
+{
+  "outputPath": "./output",
+  "dbms": "postgresql",
+  "taskId": 1,
+  "host": "localhost",
+  "port": 5432,
+  "username": "your_username",
+  "password": "your_password",
+  "dbname": "postgres",
+  "seed": 0,
+  "ddlPath": "./resources/postgresql_ddl.sql",
+  "dmlPath": "./resources/postgresql_dml.sql"
+}

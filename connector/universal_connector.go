@@ -10,6 +10,7 @@ type DBType string
 
 const (
 	DBMySQL      DBType = "mysql"
+	DBPostgreSQL DBType = "postgresql" // Native PostgreSQL
 	DBOpenGaussM DBType = "opengauss_m" // openGauss M mode (MySQL compatibility)
 	DBOpenGaussA DBType = "opengauss_a" // openGauss A mode (Oracle compatibility)
 	DBGaussDBM   DBType = "gaussdb_m"   // GaussDB M mode (MySQL compatibility)
@@ -27,6 +28,7 @@ type UniversalConnector struct {
 	mysqlConn  *Connector          // MySQL connection
 	ogConn     *OpenGaussConnector // openGauss M mode connection
 	gaConn     *GaussDBAConnector  // GaussDB A mode connection
+	pgConn     *PostgreSQLConnector // Native PostgreSQL connection
 }
 
 // NewUniversalConnector: create connector based on database type
@@ -47,6 +49,12 @@ func NewUniversalConnector(dbType DBType, host string, port int, username string
 			return nil, err
 		}
 		uc.mysqlConn = conn
+	case DBPostgreSQL:
+		conn, err := NewPostgreSQLConnector(host, port, username, password, dbname)
+		if err != nil {
+			return nil, err
+		}
+		uc.pgConn = conn
 	case DBOpenGaussM, DBGaussDBM:
 		conn, err := NewOpenGaussConnector(host, port, username, password, dbname)
 		if err != nil {
@@ -71,6 +79,8 @@ func (uc *UniversalConnector) ExecSQL(sql string) *Result {
 	switch uc.DBType {
 	case DBMySQL:
 		return uc.mysqlConn.ExecSQL(sql)
+	case DBPostgreSQL:
+		return uc.pgConn.ExecSQL(sql)
 	case DBOpenGaussM, DBGaussDBM:
 		return uc.ogConn.ExecSQL(sql)
 	case DBOpenGaussA, DBGaussDBA:
@@ -87,6 +97,8 @@ func (uc *UniversalConnector) InitDB() error {
 	switch uc.DBType {
 	case DBMySQL:
 		return uc.mysqlConn.InitDB()
+	case DBPostgreSQL:
+		return uc.pgConn.InitDB()
 	case DBOpenGaussM, DBGaussDBM:
 		return uc.ogConn.InitDB()
 	case DBOpenGaussA, DBGaussDBA:
@@ -101,6 +113,8 @@ func (uc *UniversalConnector) InitDBWithDDL(ddlSqls []*EachSql) error {
 	switch uc.DBType {
 	case DBMySQL:
 		return uc.mysqlConn.InitDBWithDDL(ddlSqls)
+	case DBPostgreSQL:
+		return uc.pgConn.InitDBWithDDL(ddlSqls)
 	case DBOpenGaussM, DBGaussDBM:
 		return uc.ogConn.InitDBWithDDL(ddlSqls)
 	case DBOpenGaussA, DBGaussDBA:
@@ -115,6 +129,8 @@ func (uc *UniversalConnector) Close() {
 	switch uc.DBType {
 	case DBMySQL:
 		uc.mysqlConn.Close()
+	case DBPostgreSQL:
+		uc.pgConn.Close()
 	case DBOpenGaussM, DBGaussDBM:
 		uc.ogConn.Close()
 	case DBOpenGaussA, DBGaussDBA:

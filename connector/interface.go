@@ -17,3 +17,6 @@ var _ SQLExecutor = (*UniversalConnector)(nil)
 
 // Ensure GaussDBAConnector implements SQLExecutor (A mode)
 var _ SQLExecutor = (*GaussDBAConnector)(nil)
+
+// Ensure PostgreSQLConnector implements SQLExecutor
+var _ SQLExecutor = (*PostgreSQLConnector)(nil)

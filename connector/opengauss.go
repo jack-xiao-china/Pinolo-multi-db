@@ -1,32 +1,38 @@
 package connector
 
 import (
-	"context"
+	"database/sql"
 	"fmt"
-	"github.com/jackc/pgx/v5"
 	"github.com/pkg/errors"
+	_ "gitee.com/opengauss/openGauss-connector-go-pq"
 )
 
 // OpenGaussConnector: connect to openGauss database (M mode - MySQL compatibility)
-// Uses PostgreSQL protocol with pgx driver
+// Uses openGauss-connector-go-pq driver for SHA256 authentication support
 type OpenGaussConnector struct {
 	Host     string
 	Port     int
 	Username string
 	Password string
 	DbName   string
-	conn     *pgx.Conn
+	db       *sql.DB
 }
 
 // NewOpenGaussConnector: create OpenGaussConnector
 // For M mode database, use: CREATE DATABASE dbname WITH DBCOMPATIBILITY 'M'
 func NewOpenGaussConnector(host string, port int, username string, password string, dbname string) (*OpenGaussConnector, error) {
-	connString := fmt.Sprintf("postgres://%s:%s@%s:%d/%s?sslmode=disable",
-		username, password, host, port, dbname)
+	connStr := fmt.Sprintf("host=%s port=%d user=%s password=%s dbname=%s sslmode=disable",
+		host, port, username, password, dbname)
 
-	conn, err := pgx.Connect(context.Background(), connString)
+	db, err := sql.Open("opengauss", connStr)
 	if err != nil {
-		return nil, errors.Wrap(err, "[NewOpenGaussConnector]connect error")
+		return nil, errors.Wrap(err, "[NewOpenGaussConnector]sql.Open error")
+	}
+
+	// Test connection
+	err = db.Ping()
+	if err != nil {
+		return nil, errors.Wrap(err, "[NewOpenGaussConnector]ping error")
 	}
 
 	ogConn := &OpenGaussConnector{
@@ -35,14 +41,14 @@ func NewOpenGaussConnector(host string, port int, username string, password stri
 		Username: username,
 		Password: password,
 		DbName:   dbname,
-		conn:     conn,
+		db:       db,
 	}
 
 	return ogConn, nil
 }
 
 // ExecSQL: execute SQL and return result
-func (ogConn *OpenGaussConnector) ExecSQL(sql string) *Result {
+func (ogConn *OpenGaussConnector) ExecSQL(sqlStr string) *Result {
 	result := &Result{
 		ColumnNames: make([]string, 0),
 		ColumnTypes: make([]string, 0),
@@ -50,7 +56,7 @@ func (ogConn *OpenGaussConnector) ExecSQL(sql string) *Result {
 		Err:         nil,
 	}
 
-	rows, err := ogConn.conn.Query(context.Background(), sql)
+	rows, err := ogConn.db.Query(sqlStr)
 	if err != nil {
 		result.Err = errors.Wrap(err, "[OpenGaussConnector.ExecSQL]query error")
 		return result
@@ -58,22 +64,38 @@ func (ogConn *OpenGaussConnector) ExecSQL(sql string) *Result {
 	defer rows.Close()
 
 	// Get column info
-	fieldDescriptions := rows.FieldDescriptions()
-	for _, fd := range fieldDescriptions {
-		result.ColumnNames = append(result.ColumnNames, string(fd.Name))
-		// PostgreSQL uses OID for type, convert to string
-		result.ColumnTypes = append(result.ColumnTypes, fmt.Sprintf("OID_%d", fd.DataTypeOID))
+	columns, err := rows.Columns()
+	if err != nil {
+		result.Err = errors.Wrap(err, "[OpenGaussConnector.ExecSQL]get columns error")
+		return result
+	}
+	result.ColumnNames = columns
+
+	// Get column types
+	columnTypes, err := rows.ColumnTypes()
+	if err != nil {
+		result.Err = errors.Wrap(err, "[OpenGaussConnector.ExecSQL]get column types error")
+		return result
+	}
+	for _, ct := range columnTypes {
+		result.ColumnTypes = append(result.ColumnTypes, ct.DatabaseTypeName())
 	}
 
 	// Scan rows
 	for rows.Next() {
-		values, err := rows.Values()
+		values := make([]interface{}, len(columns))
+		valuePtrs := make([]interface{}, len(columns))
+		for i := range values {
+			valuePtrs[i] = &values[i]
+		}
+
+		err := rows.Scan(valuePtrs...)
 		if err != nil {
-			result.Err = errors.Wrap(err, "[OpenGaussConnector.ExecSQL]scan values error")
+			result.Err = errors.Wrap(err, "[OpenGaussConnector.ExecSQL]scan error")
 			return result
 		}
 
-		rowData := make([]string, len(values))
+		rowData := make([]string, len(columns))
 		for i, v := range values {
 			if v == nil {
 				rowData[i] = "NULL"
@@ -114,7 +136,7 @@ func (ogConn *OpenGaussConnector) InitDBWithDDL(ddlSqls []*EachSql) error {
 
 // Close: close connection
 func (ogConn *OpenGaussConnector) Close() {
-	if ogConn.conn != nil {
-		ogConn.conn.Close(context.Background())
+	if ogConn.db != nil {
+		ogConn.db.Close()
 	}
 }

@@ -58,7 +58,7 @@ func doTask(args []string) {
 	if err != nil {
 		log.Fatal("[doTask]new task config error: ", err)
 	}
-	_, err = task.RunTask(taskConfig, nil, nil)
+	_, err = task.RunTaskUniversal(taskConfig, nil)
 	if err != nil {
 		log.Fatal("[doTask]task error: ", err)
 	}
@@ -72,7 +72,7 @@ func doTaskPool(args []string) {
 	if err != nil {
 		log.Fatal("[doTaskPool]new task pool config error: ", err)
 	}
-	_, err = task.RunTaskPool(taskPoolConfig)
+	_, err = task.RunTaskPoolUniversal(taskPoolConfig)
 	if err != nil {
 		log.Fatal("[doTaskPool]task pool error: ", err)
 	}
