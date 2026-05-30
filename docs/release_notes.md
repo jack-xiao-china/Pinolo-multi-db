@@ -1,3 +1,8 @@
+## v0.2.4 | 2026-05-30
+- 优化：移除所有 Docker 环境准备内容（USER_GUIDE.md、README.md、POSTGRESQL_SUPPORT.md、CLAUDE.md、testsqls/doc.go、connector/connector_test.go），项目定位为工具本身，被测数据库环境由用户自行指定
+- 优化：USER_GUIDE.md Section 6 简化为"运行示例"，仅保留 GaussDB 兼容模式创建说明和运行命令
+- 优化：README.md 移除所有 Docker 命令，改为"用户需自行准备 DBMS 环境"
+
 ## v0.2.3 | 2026-05-30
 - 安全：`testsqls/testsqls.go` 和 `connector/connector_test.go` 硬编码密码改为环境变量读取（TEST_DB_HOST/TEST_DB_PASSWORD/TEST_DB_PORT 等），默认密码改为 `your_password`
 - 安全：`testsqls/doc.go` Docker 注释中密码替换为 `your_password`

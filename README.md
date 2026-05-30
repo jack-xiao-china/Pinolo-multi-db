@@ -102,15 +102,9 @@ go build
 
 Now you will see an executable file `${IMPOHOME}/impomysql`.
 
-### 3.2 start your DBMS
+### 3.2 prepare your DBMS
 
-For example, you can start mysql with docker:
-
-```shell
-sudo docker run -itd --name mysqltest -p 13306:3306 -e MYSQL_ROOT_PASSWORD=123456 mysql:8.0.30
-```
-
-You can also compile and install the DBMS yourself.
+You need a running DBMS instance accessible from the host where impomysql runs. Configure the connection in the task config JSON (host, port, username, password, dbname). See `resources/taskconfig.json` as an example.
 
 ### 3.3 run task
 
@@ -118,7 +112,7 @@ We consider a DBMS test as a `task`.
 
 #### quick start
 
-We assume you have executed `sudo docker run -itd --name mysqltest -p 13306:3306 -e MYSQL_ROOT_PASSWORD=123456 mysql:8.0.30`
+Make sure your DBMS is running and the config file points to it:
 
 ```shell
 cd ${IMPOHOME}
@@ -199,7 +193,7 @@ Now you will see an executable file `go-randgen`, copy it to `${IMPOHOME}/resour
 
 #### quick start
 
-We assume you have executed `sudo docker run -itd --name mysqltest -p 13306:3306 -e MYSQL_ROOT_PASSWORD=123456 mysql:8.0.30`
+Make sure your DBMS is running and the config file points to it:
 
 ```shell
 cd ${IMPOHOME}
@@ -265,7 +259,7 @@ Of course, if you set `needDML` to false, we will delete `output.rand.sql`.
 
 #### quick start
 
-We assume you have executed `sudo docker run -itd --name mysqltest -p 13306:3306 -e MYSQL_ROOT_PASSWORD=123456 mysql:8.0.30`
+Make sure your DBMS is running and the config file points to it:
 
 ```shell
 cd ${IMPOHOME}
@@ -354,49 +348,29 @@ Note that:
 
 #### test dbms
 
-We provide default configuration files for mysql, mariadb, tidb, oceanbase, you can follow these configuration files to test your own database.
+We provide default configuration files for mysql, mariadb, tidb, oceanbase. Adjust the connection settings (host, port, username, password) to match your environment before running:
 
 1. mysql
    
    ```shell
-   # sudo docker run -itd --name mysqltest -p 13306:3306 -e MYSQL_ROOT_PASSWORD=123456 mysql:8.0.30
-   # see https://hub.docker.com/_/mysql/tags
-   # or build it yourself
-   # see https://github.com/mysql/mysql-server
    ./impomysql taskpool ./resources/testmysql.json
    ```
 
 2. mariadb
    
    ```shell
-   # sudo docker run -itd --name mariadbtest -p 23306:3306 -e MYSQL_ROOT_PASSWORD=123456 --privileged=true mariadb:10.11.1-rc
-   # see https://hub.docker.com/_/mariadb/tags
-   # or build it yourself
-   # see https://github.com/MariaDB/server
    ./impomysql taskpool ./resources/testmariadb.json
    ```
 
 3. tidb
    
    ```shell
-   # sudo docker run -itd --name tidbtest -p 4000:4000 pingcap/tidb:v6.4.0
-   # mysql -h 127.0.0.1 -P 4000 -u root
-   # SET PASSWORD = '123456';
-   # see https://hub.docker.com/r/pingcap/tidb/tags
-   # or build it yourself
-   # see https://github.com/pingcap/tidb
    ./impomysql taskpool ./resources/testtidb.json
    ```
 
 4. oceanbase
    
    ```shell
-   # sudo docker run -itd --name oceanbasetest -p 2881:2881 oceanbase/oceanbase-ce:4.0.0.0
-   # mysql -h 127.0.0.1 -P 2881 -u root
-   # SET PASSWORD = PASSWORD('123456');
-   # see https://hub.docker.com/r/oceanbase/oceanbase-ce/tags
-   # or build it yourself
-   # see https://github.com/oceanbase/oceanbase
    ./impomysql taskpool ./resources/testoceanbase.json
    ```
 
@@ -590,13 +564,7 @@ taskId      bugJsonName                  version     status
 
 It means that all bugs can be reproduced on `mysql 8.0.30`. 
 
-Then deploy `mysql 5.7`:
-
-```shell
-sudo docker run -itd --name mysqltest2 -p 13307:3306 -e MYSQL_ROOT_PASSWORD=123456 mysql:5.7
-```
-
-Run `affversion` again:
+Then deploy `mysql 5.7` on another port and run `affversion` again:
 
 ```shell
 ./impomysql affversion taskpool ./resources/taskpoolconfig.json 16 13307 5.7 8.0.30@1

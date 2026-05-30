@@ -324,67 +324,12 @@ echo "编译成功: ./impomysql"
 
 ## 6 运行示例
 
-### 6.1 PostgreSQL 环境准备
+本项目仅提供逻辑漏洞检测工具，被测数据库环境由用户自行准备。运行前需确保：
+- 目标数据库已启动且可访问
+- 配置文件中的 host/port/username/password/dbname 与实际环境一致
+- GaussDB A/M 模式需在服务端预先创建兼容模式数据库（见 6.1）
 
-```bash
-# Docker 快速启动 PostgreSQL
-docker run -d --name pgtest -p 5432:5432 \
-    -e POSTGRES_USER=your_username \
-    -e POSTGRES_PASSWORD=your_password \
-    -e POSTGRES_DB=postgres \
-    postgres:17
-
-# 验证连接（请替换 your_username 为实际用户名）
-psql -h localhost -p 5432 -U your_username -d postgres -c "SELECT 1"
-```
-
-### 6.2 MySQL 环境准备
-
-```bash
-docker run -d --name mysqltest -p 13306:3306 \
-    -e MYSQL_ROOT_PASSWORD=your_password \
-    mysql:8.0.30
-```
-
-### 6.3 MariaDB 环境准备
-
-```bash
-docker run -d --name mariadbtest -p 23306:3306 \
-    -e MYSQL_ROOT_PASSWORD=your_password \
-    mariadb:11.4
-```
-
-### 6.4 TiDB 环境准备
-
-```bash
-docker run -d --name tidbtest -p 4000:4000 pingcap/tidb:v6.5.0
-# TiDB 默认 root 用户无密码
-```
-
-### 6.5 OceanBase 环境准备
-
-```bash
-docker run -d --name oceanbasetest -p 2881:2881 oceanbase/oceanbase-ce:4.2.1
-# OceanBase 启动较慢（约 2-5 分钟），耐心等待后再连接
-```
-
-### 6.6 openGauss 环境准备
-
-openGauss 无官方简便 Docker 镜像，推荐使用社区镜像或手动安装：
-
-```bash
-# 社区镜像（enmotech/opengauss），需 privileged 模式
-docker run -d --name opengausstest --privileged -p 5432:5432 \
-    -e GS_PASSWORD=your_password \
-    enmotech/opengauss:5.0.0
-# 启动后需进入容器手动创建兼容模式数据库：
-# M 模式: CREATE DATABASE testm WITH DBCOMPATIBILITY 'M';
-# A 模式: CREATE DATABASE testa WITH DBCOMPATIBILITY 'A';
-```
-
-> **GaussDB 说明**：GaussDB 需华为云实例或手动部署，无公开 Docker 镜像。请参照华为云文档部署后，手动创建兼容模式数据库。
-
-### 6.7 GaussDB A/M 兼容模式数据库创建
+### 6.1 GaussDB/openGauss 兼容模式数据库创建
 
 需在 GaussDB 或 openGauss 服务端预先创建兼容模式数据库：
 
@@ -396,7 +341,9 @@ CREATE DATABASE testa WITH DBCOMPATIBILITY 'A';
 CREATE DATABASE testm WITH DBCOMPATIBILITY 'M';
 ```
 
-### 6.8 运行单任务
+> PostgreSQL 模式无需额外创建兼容数据库，直接使用现有数据库即可。
+
+### 6.2 运行单任务
 
 ```bash
 # PostgreSQL
@@ -412,7 +359,7 @@ CREATE DATABASE testm WITH DBCOMPATIBILITY 'M';
 ./impomysql task ./resources/gaussdb_m_task.json
 ```
 
-### 6.9 运行任务池
+### 6.3 运行任务池
 
 ```bash
 # PostgreSQL 并行测试（4线程）
@@ -422,7 +369,7 @@ CREATE DATABASE testm WITH DBCOMPATIBILITY 'M';
 ./impomysql taskpool ./resources/taskpoolconfig.json
 ```
 
-### 6.10 Bug 稳定性验证
+### 6.4 Bug 稳定性验证
 
 ```bash
 # 单任务重复执行 10 次验证 Bug 是否稳定复现
@@ -432,14 +379,14 @@ CREATE DATABASE testm WITH DBCOMPATIBILITY 'M';
 ./impomysql ckstable taskpool ./resources/taskpoolconfig.json 4 10
 ```
 
-### 6.11 SQL 简化
+### 6.5 SQL 简化
 
 ```bash
 # 简化触发 Bug 的 SQL 语句，便于问题定位
 ./impomysql sqlsim task ./resources/postgresql_task.json
 ```
 
-### 6.12 版本影响验证
+### 6.6 版本影响验证
 
 ```bash
 # 验证 Bug 在特定版本是否受影响

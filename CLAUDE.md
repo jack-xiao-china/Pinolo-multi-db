@@ -115,9 +115,9 @@ Tests require a MySQL-compatible database running. The `testsqls` package uses h
 - MariaDB port: `23306`
 - TiDB port: `4000`
 - OceanBase port: `2881`
-- Credentials: `root/123456`, database `TEST`
+- Credentials: `root/your_password`, database `TEST`
 
-Start MySQL test instance: `docker run -itd --name mysqltest -p 13306:3306 -e MYSQL_ROOT_PASSWORD=123456 mysql:8.0.30`
+Users must provide their own DBMS test environment. The tool itself does not depend on Docker.
 
 ## Important Notes
 

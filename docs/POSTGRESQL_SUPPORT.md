@@ -376,13 +376,7 @@ func TestPgMutateVisitorFindCandidates(t *testing.T) {
 ### 7.2 集成测试
 
 ```bash
-# 启动 PostgreSQL 测试环境
-docker run -d --name pgtest -p 5432:5432 \
-    -e POSTGRES_USER=your_username \
-    -e POSTGRES_PASSWORD=your_password \
-    -e POSTGRES_DB=testdb \
-    postgres:17
-
+# 确保 PostgreSQL 测试环境已就绪，配置文件指向正确的连接信息
 # 运行集成测试
 ./impomysql task ./resources/postgresql_task.json
 
@@ -399,7 +393,7 @@ cat output/postgresql/task-1/result.json
 | pg_query AST 结构复杂 | 中 | 变异实现难度增加 | 参考官方文档，逐步适配 |
 | PostgreSQL 语义与 MySQL 差异 | 中 | Bug 判断逻辑差异 | 详细语义分析，调整 IsUpper |
 | pgx 连接池配置 | 低 | 性能问题 | 使用默认配置，必要时调整 |
-| 测试环境搭建 | 低 | 验证受阻 | 使用 Docker 快速搭建 |
+| 测试环境搭建 | 低 | 验证受阻 | 用户自行准备被测数据库环境 |
 
 ---
 

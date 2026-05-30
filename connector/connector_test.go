@@ -8,7 +8,7 @@ import (
 
 // Connection config from environment variables (with defaults for local dev)
 // Env vars: TEST_DB_HOST, TEST_DB_PORT, TEST_DB_USERNAME, TEST_DB_PASSWORD, TEST_DB_NAME
-// Example: docker run -itd --name test -p 13306:3306 -e MYSQL_ROOT_PASSWORD=your_password mysql
+// Database environment must be provided by the user.
 var (
 	testHost     = getEnvOrDefault("TEST_DB_HOST", "127.0.0.1")
 	testPort     = getEnvIntOrDefault("TEST_DB_PORT", 13306)
