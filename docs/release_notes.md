@@ -1,3 +1,6 @@
+## v0.2.1 | 2026-05-30
+- 安全：移除 docs 和 resources 中所有真实凭证信息（用户名、密码、IP 地址），替换为占位符 `your_username`/`your_password`/`your_host`
+
 ## v0.2.0 | 2026-05-21
 - 优化：go.mod replace 依赖改为相对路径（`./third_party/`），支持 Linux 编译移植
 - 新增：pg_query_go 和 openGauss-connector-go-pq 内置到 `third_party/` 目录，无需外部下载

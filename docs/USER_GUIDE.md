@@ -130,8 +130,8 @@ echo "编译成功: ./impomysql"
   "taskId": 1,
   "host": "localhost",
   "port": 5432,
-  "username": "tpcc",
-  "password": "Taurus@123",
+  "username": "your_username",
+  "password": "your_password",
   "dbname": "postgres",
   "seed": 0,
   "ddlPath": "./resources/postgresql_ddl.sql",
@@ -175,8 +175,8 @@ echo "编译成功: ./impomysql"
   "dbms": "mysql",
   "host": "127.0.0.1",
   "port": 13306,
-  "username": "root",
-  "password": "123456",
+  "username": "your_username",
+  "password": "your_password",
   "dbPrefix": "TEST",
   "seed": 123456,
   "randGenPath": "./resources/go-randgen",
@@ -197,8 +197,8 @@ echo "编译成功: ./impomysql"
   "dbms": "postgresql",
   "host": "localhost",
   "port": 5432,
-  "username": "tpcc",
-  "password": "Taurus@123",
+  "username": "your_username",
+  "password": "your_password",
   "dbPrefix": "pgtest_",
   "seed": 0,
   "threadNum": 4,
@@ -250,20 +250,20 @@ echo "编译成功: ./impomysql"
 ```bash
 # Docker 快速启动 PostgreSQL
 docker run -d --name pgtest -p 5432:5432 \
-    -e POSTGRES_USER=tpcc \
-    -e POSTGRES_PASSWORD=Taurus@123 \
+    -e POSTGRES_USER=your_username \
+    -e POSTGRES_PASSWORD=your_password \
     -e POSTGRES_DB=postgres \
     postgres:17
 
-# 验证连接
-psql -h localhost -p 5432 -U tpcc -d postgres -c "SELECT 1"
+# 验证连接（请替换 your_username 为实际用户名）
+psql -h localhost -p 5432 -U your_username -d postgres -c "SELECT 1"
 ```
 
 ### 6.2 MySQL 环境准备
 
 ```bash
 docker run -d --name mysqltest -p 13306:3306 \
-    -e MYSQL_ROOT_PASSWORD=123456 \
+    -e MYSQL_ROOT_PASSWORD=your_password \
     mysql:8.0.30
 ```
 

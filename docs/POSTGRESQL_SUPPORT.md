@@ -289,8 +289,8 @@ func (v *PgMutateVisitor) FindCandidates() map[string][]*parser.MutationCandidat
   "taskId": 1,
   "host": "localhost",
   "port": 5432,
-  "username": "tpcc",
-  "password": "Taurus@123",
+  "username": "your_username",
+  "password": "your_password",
   "dbname": "testdb",
   "seed": 0,
   "ddlPath": "./resources/postgresql_ddl.sql",
@@ -378,8 +378,8 @@ func TestPgMutateVisitorFindCandidates(t *testing.T) {
 ```bash
 # 启动 PostgreSQL 测试环境
 docker run -d --name pgtest -p 5432:5432 \
-    -e POSTGRES_USER=tpcc \
-    -e POSTGRES_PASSWORD=Taurus@123 \
+    -e POSTGRES_USER=your_username \
+    -e POSTGRES_PASSWORD=your_password \
     -e POSTGRES_DB=testdb \
     postgres:17
 
