@@ -1,18 +1,37 @@
 package connector
 
 import (
+	"os"
 	"strconv"
 	"testing"
 )
 
-// sudo docker run -itd --name test -p 13306:3306 -e MYSQL_ROOT_PASSWORD=123456 mysql
-const (
-	testHost = "127.0.0.1"
-	testPort = 13306
-	testUsername = "root"
-	testPassword = "123456"
-	testDBname = "TEST"
+// Connection config from environment variables (with defaults for local dev)
+// Env vars: TEST_DB_HOST, TEST_DB_PORT, TEST_DB_USERNAME, TEST_DB_PASSWORD, TEST_DB_NAME
+// Example: docker run -itd --name test -p 13306:3306 -e MYSQL_ROOT_PASSWORD=your_password mysql
+var (
+	testHost     = getEnvOrDefault("TEST_DB_HOST", "127.0.0.1")
+	testPort     = getEnvIntOrDefault("TEST_DB_PORT", 13306)
+	testUsername = getEnvOrDefault("TEST_DB_USERNAME", "root")
+	testPassword = getEnvOrDefault("TEST_DB_PASSWORD", "your_password")
+	testDBname   = getEnvOrDefault("TEST_DB_NAME", "TEST")
 )
+
+func getEnvOrDefault(key, defaultVal string) string {
+	if val := os.Getenv(key); val != "" {
+		return val
+	}
+	return defaultVal
+}
+
+func getEnvIntOrDefault(key, defaultVal int) int {
+	if val := os.Getenv(key); val != "" {
+		if intVal, err := strconv.Atoi(val); err == nil {
+			return intVal
+		}
+	}
+	return defaultVal
+}
 
 func TestConnector_ExecSQL(t *testing.T) {
 	conn, err := NewConnector(testHost, testPort, testUsername, testPassword, testDBname)

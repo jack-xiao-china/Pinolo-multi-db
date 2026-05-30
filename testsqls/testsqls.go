@@ -2,26 +2,47 @@ package testsqls
 
 import (
 	"fmt"
+	"os"
+	"strconv"
+
 	"github.com/qaqcatz/impomysql/connector"
 )
 
-// dbms
-const (
-	host     = "127.0.0.1"
-	username = "root"
-	password = "123456"
-	dbname   = "TEST"
+// dbms connection config (read from environment variables, with defaults for local dev)
+// Env vars: TEST_DB_HOST, TEST_DB_USERNAME, TEST_DB_PASSWORD, TEST_DB_NAME
+//           TEST_DB_PORT_MYSQL, TEST_DB_PORT_MARIADB, TEST_DB_PORT_TIDB, TEST_DB_PORT_OCEANBASE
+var (
+	host     = getEnvOrDefault("TEST_DB_HOST", "127.0.0.1")
+	username = getEnvOrDefault("TEST_DB_USERNAME", "root")
+	password = getEnvOrDefault("TEST_DB_PASSWORD", "your_password")
+	dbname   = getEnvOrDefault("TEST_DB_NAME", "TEST")
 
 	MySQL     = "mysql"
 	MariaDB   = "mariadb"
 	TiDB      = "tidb"
 	OceanBase = "oceanbase"
 
-	mySQLPort     = 13306
-	mariaDBPort   = 23306
-	tiDBPort      = 4000
-	oceanBasePort = 2881
+	mySQLPort     = getEnvIntOrDefault("TEST_DB_PORT_MYSQL", 13306)
+	mariaDBPort   = getEnvIntOrDefault("TEST_DB_PORT_MARIADB", 23306)
+	tiDBPort      = getEnvIntOrDefault("TEST_DB_PORT_TIDB", 4000)
+	oceanBasePort = getEnvIntOrDefault("TEST_DB_PORT_OCEANBASE", 2881)
 )
+
+func getEnvOrDefault(key, defaultVal string) string {
+	if val := os.Getenv(key); val != "" {
+		return val
+	}
+	return defaultVal
+}
+
+func getEnvIntOrDefault(key, defaultVal int) int {
+	if val := os.Getenv(key); val != "" {
+		if intVal, err := strconv.Atoi(val); err == nil {
+			return intVal
+		}
+	}
+	return defaultVal
+}
 
 // GetConnector: get connector for the DBMS, default: MySQL
 func GetConnector(DBMS string) (*connector.Connector, error) {
@@ -156,4 +177,4 @@ const (
 	SQLTimeFunc = "SELECT to_seconds('1998-06-24 00:00:01') FROM COMPANY WHERE to_seconds('1998-05-01 00:00:01') > 0;"
 	SQLStrFunc = "SELECT to_base64('123');"
 	SQLInfoFunc = "SELECT format_bytes('123');"
-	)
+)
