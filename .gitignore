@@ -15,7 +15,7 @@
 go.work
 
 # Dependency directories
-vendor/
+
 
 # Output directory
 output/
@@ -54,5 +54,3 @@ resources/postgresql_taskpool.json
 
 # Third-party local dependencies (too large for git history, user must copy manually)
 # See setup_third_party.sh for initialization
-third_party/pg_query_go/
-third_party/openGauss-connector-go-pq/
