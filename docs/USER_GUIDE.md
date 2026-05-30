@@ -22,36 +22,102 @@ PINOLO (impomysql) 基于 **Implication Oracle** 方法检测数据库逻辑漏�
 
 ### 3.1 前提条件
 
-- Go 1.20+
-- **GCC 编译器**（pg_query_go 含 C 代码，必须 CGO 编译）
-- 运行 setup_third_party.sh 初始化本地依赖（pg_query_go + openGauss-connector-go-pq）
+- **Go**: 1.20+（最低兼容版本，pg_query_go 要求）；go.mod 指令为 `go 1.25.0`，建议使用当前最新稳定版 Go
+- **CGO 编译器**: `CGO_ENABLED=1` 是必须的，以下两个包含 C 代码无法纯 Go 编译：
+  - `pg_query_go`（PostgreSQL 17 Parser，74 个 .c 文件，需要 pthread、-std=gnu99）
+  - `go-sqlite3`（SQLite C 库，affversion 功能使用）
+  - `openGauss-connector-go-pq` 为纯 Go 实现，不需要 CGO
+  - 所有 C 代码均为自包含，无外部共享库依赖（LDFLAGS 为空，无需 libpq/libprotobuf 等）
+- **Git**: setup_third_party.sh 需要克隆远程仓库
+- 运行 `setup_third_party.sh` 初始化本地依赖（pg_query_go + openGauss-connector-go-pq）
+
+**Linux 系统依赖**：
+
+| 用途 | Ubuntu/Debian | CentOS/RHEL |
+|------|---------------|-------------|
+| C 编译器 + 标准库 | `sudo apt install -y build-essential`（含 gcc、make、libc6-dev） | `sudo yum install -y gcc glibc-devel` |
+| Git | `sudo apt install -y git` | `sudo yum install -y git` |
+
+> **注意**：`build-essential` 是 Ubuntu 的元包，包含 gcc、make、libc6-dev 等编译必备组件，比单独安装 gcc libc6-dev 更完整。CentOS/RHEL 无对应元包，需分别安装 gcc 和 glibc-devel。
+>
+> 本项目**不需要**以下额外系统包：protobuf/protoc、flex/bison、libpq-dev、libssl-dev、libkrb5-dev、pkg-config。pg_query_go 内置了 protobuf-c C 实现和预生成的语法文件；openGauss-connector-go-pq 是纯 Go 驱动，无需 libpq。
 
 ### 3.2 初始化第三方依赖
 
 ```bash
-# 首次编译前，运行初始化脚本下载 pg_query_go 和 openGauss-connector-go-pq
+# 首次编译前，运行初始化脚本
 bash setup_third_party.sh
 ```
 
-脚本会将依赖克隆到 `third_party/` 目录（go.mod replace 已指向此路径）。如脚本无法执行，可手动克隆：
+**脚本功能**：克隆两个仓库到 `third_party/` 目录（go.mod replace 已指向此路径）：
+- `pg_query_go`：从 `github.com/pganalyze` 克隆 v6 分支（shallow clone --depth 1）
+- `openGauss-connector-go-pq`：从 `gitee.com/opengauss` 克隆（shallow clone --depth 1）
+- 脚本会检测已有目录并跳过，可安全重复执行
+- 两个仓库合计约 100MB 磁盘空间
+
+如脚本无法执行，可手动克隆：
 
 ```bash
 mkdir -p third_party
 git clone --depth 1 https://github.com/pganalyze/pg_query_go.git third_party/pg_query_go
+cd third_party/pg_query_go && git checkout v6 2>/dev/null; cd -
 git clone --depth 1 https://gitee.com/opengauss/openGauss-connector-go-pq.git third_party/openGauss-connector-go-pq
 ```
 
+**网络故障处理**：
+- 如果 `github.com` 访问超时（常见于部分网络环境），可配置 git 代理或使用镜像
+- 脚本可重复执行，已克隆的仓库会自动跳过
+- 克隆完成后，验证依赖目录存在：
+  ```bash
+  ls third_party/pg_query_go/parser/parser.go third_party/openGauss-connector-go-pq/go.mod
+  ```
+
+**Go 模块代理配置**（推荐，尤其在中国网络环境下）：
+```bash
+go env -w GOPROXY=https://goproxy.cn,direct
+```
+此配置全局生效，使 `go mod download` 和 `go build` 下载其他依赖（pgx、tidb parser 等）时通过国内代理，显著提升可靠性。
+
 ### 3.3 Linux 编译
 
-```bash
-# 安装 GCC（如未安装）
-# Ubuntu/Debian: sudo apt install gcc libc6-dev
-# CentOS/RHEL:   sudo yum install gcc glibc-devel
+完整编译流程（逐步验证）：
 
+```bash
+# Step 1: 安装系统依赖
+# Ubuntu/Debian:
+sudo apt install -y build-essential git
+# CentOS/RHEL:
+sudo yum install -y gcc glibc-devel git
+
+# Step 2: 验证 Go 已安装
+go version
+# 期望输出: go1.21+ 或更高版本
+# 如未安装，参见 3.6 一键部署脚本或手动安装
+
+# Step 3: 配置 GOPROXY（可选，推荐中国用户）
+go env -w GOPROXY=https://goproxy.cn,direct
+
+# Step 4: 初始化第三方依赖
 cd /path/to/Pinolo-main
-bash setup_third_party.sh  # 首次编译
+bash setup_third_party.sh
+
+# Step 5: 验证第三方依赖目录存在
+ls third_party/pg_query_go/parser/parser.go third_party/openGauss-connector-go-pq/go.mod
+
+# Step 6: 下载 Go 模块依赖
+go mod download
+
+# Step 7: 编译（CGO_ENABLED=1 是必须的）
 CGO_ENABLED=1 go build -o impomysql
+
+# Step 8: 验证编译结果
+./impomysql
+# 期望输出: 程序因缺少子命令参数退出（正常行为）
 ```
+
+> **编译耗时说明**：pg_query_go 含 74 个 .c 文件，首次编译约 30-60 秒，后续增量编译很快。在内存不足的环境（< 1GB）下可能编译失败，可通过 `GOGC=50` 减少并行度缓解。
+>
+> **架构限制**：仅 amd64 (x86_64) 架构经过测试。ARM64 (aarch64) 编译需修改 pg_query_go 的 CGO CFLAGS，参见 `third_party/pg_query_go/parser/parser.go`。
 
 ### 3.4 Windows 编译
 
@@ -65,37 +131,50 @@ set CGO_ENABLED=1
 go build -o impomysql.exe
 ```
 
-### 3.4 编译问题排查
+### 3.5 编译问题排查
 
 | 错误信息 | 原因 | 解决 |
 |----------|------|------|
-| `C compiler "gcc" not found` | GCC 不在 PATH 中 | 安装 MinGW-w64 / gcc，加入 PATH |
+| `C compiler "gcc" not found` | GCC 不在 PATH 中 | 安装 gcc（Ubuntu: `build-essential`，CentOS: `gcc glibc-devel`），加入 PATH |
 | `64-bit mode not compiled in` | 使用了 32 位 MinGW | 安装 MinGW-w64（64 位版本） |
-| `undefined: pgquery.Parse` | CGO_ENABLED=0 | 设置 `CGO_ENABLED=1` |
-| `cannot find package pg_query_go` | go.mod replace 路径错误 | 检查 `third_party/` 目录是否存在 |
+| `undefined: pgquery.Parse` | CGO_ENABLED=0 | 设置 `CGO_ENABLED=1`（pg_query_go 和 go-sqlite3 含 C 代码，必须 CGO） |
+| `cannot find package pg_query_go` | go.mod replace 路径错误 | 检查 `third_party/pg_query_go/` 目录是否存在；运行 `bash setup_third_party.sh` |
+| `undefined reference to pthread_create` | 缺少 pthread 库/头文件 | Ubuntu: `sudo apt install libc6-dev`；CentOS: `sudo yum install glibc-devel`；验证: `ldconfig -p | grep pthread` |
+| `fatal error: stdlib.h: No such file or directory` | C 标准头文件缺失 | Ubuntu: `sudo apt install build-essential`；CentOS: `sudo yum install glibc-devel` |
+| `cc1: error: unrecognized option '-std=gnu99'` | gcc 版本过旧（CentOS 7 默认 gcc 4.8） | 安装新版 gcc：`yum install centos-release-scl && yum install devtoolset-7 && scl enable devtoolset-7 bash` |
+| `go: module pg_query_go/v6@v6.0.0: module lookup` | third_party 目录不存在或 replace 未生效 | 1. 运行 `bash setup_third_party.sh`<br>2. 验证 `third_party/pg_query_go/parser/parser.go` 存在<br>3. 检查 go.mod replace 指向 `./third_party/pg_query_go` |
+| `go mod download` 网络超时 | Go 模块代理不可达 | 配置 GOPROXY: `go env -w GOPROXY=https://goproxy.cn,direct`；验证: `go env GOPROXY` |
+| 编译 OOM 或时间过长（> 5 分钟） | 内存不足或编译环境问题 | 1. pg_query_go 74 个 .c 文件编译较慢属正常<br>2. 低内存环境: `GOGC=50 CGO_ENABLED=1 go build -o impomysql`<br>3. 检查 `dmesg | grep -i oom` 确认是否有 OOM kill |
 
-### 3.5 Linux 一键部署脚本
+### 3.6 Linux 一键部署脚本
 
 ```bash
 #!/bin/bash
-# install_deps.sh - Pinolo Linux 部署
+# install_deps.sh - Pinolo Linux 一键部署
 set -e
 
-# 安装 Go（如未安装）
+# Step 1: 安装系统依赖
+sudo apt install -y build-essential git || sudo yum install -y gcc glibc-devel git
+
+# Step 2: 安装 Go（如未安装）
+# 请先访问 https://go.dev/dl/ 查看最新稳定版本号
+GO_VERSION="1.24.3"
 if ! command -v go &>/dev/null; then
-    wget -q https://go.dev/dl/go1.25.0.linux-amd64.tar.gz
-    sudo tar -C /usr/local -xzf go1.25.0.linux-amd64.tar.gz
+    wget -q https://go.dev/dl/go${GO_VERSION}.linux-amd64.tar.gz
+    sudo tar -C /usr/local -xzf go${GO_VERSION}.linux-amd64.tar.gz
     export PATH=$PATH:/usr/local/go/bin
     echo 'export PATH=$PATH:/usr/local/go/bin' >> ~/.bashrc
 fi
+go version || { echo "Go 安装失败"; exit 1; }
 
-# 安装 GCC
-sudo apt install -y gcc libc6-dev || sudo yum install -y gcc glibc-devel
+# Step 3: 配置 GOPROXY（推荐中国用户）
+go env -w GOPROXY=https://goproxy.cn,direct
 
-# 初始化依赖 + 编译
+# Step 4: 初始化依赖 + 编译
 cd /path/to/Pinolo-main
 bash setup_third_party.sh
-CGO_ENABLED=1 go build -o impomysql
+# CGO_ENABLED=1 是必须的（pg_query_go 和 go-sqlite3 含 C 代码）
+CGO_ENABLED=1 go build -o impomysql || { echo "编译失败，请检查上方错误信息"; exit 1; }
 echo "编译成功: ./impomysql"
 ```
 
@@ -267,9 +346,47 @@ docker run -d --name mysqltest -p 13306:3306 \
     mysql:8.0.30
 ```
 
-### 6.3 GaussDB A/M 环境
+### 6.3 MariaDB 环境准备
 
-需在 GaussDB 服务端预先创建兼容模式数据库：
+```bash
+docker run -d --name mariadbtest -p 23306:3306 \
+    -e MYSQL_ROOT_PASSWORD=your_password \
+    mariadb:11.4
+```
+
+### 6.4 TiDB 环境准备
+
+```bash
+docker run -d --name tidbtest -p 4000:4000 pingcap/tidb:v6.5.0
+# TiDB 默认 root 用户无密码
+```
+
+### 6.5 OceanBase 环境准备
+
+```bash
+docker run -d --name oceanbasetest -p 2881:2881 oceanbase/oceanbase-ce:4.2.1
+# OceanBase 启动较慢（约 2-5 分钟），耐心等待后再连接
+```
+
+### 6.6 openGauss 环境准备
+
+openGauss 无官方简便 Docker 镜像，推荐使用社区镜像或手动安装：
+
+```bash
+# 社区镜像（enmotech/opengauss），需 privileged 模式
+docker run -d --name opengausstest --privileged -p 5432:5432 \
+    -e GS_PASSWORD=your_password \
+    enmotech/opengauss:5.0.0
+# 启动后需进入容器手动创建兼容模式数据库：
+# M 模式: CREATE DATABASE testm WITH DBCOMPATIBILITY 'M';
+# A 模式: CREATE DATABASE testa WITH DBCOMPATIBILITY 'A';
+```
+
+> **GaussDB 说明**：GaussDB 需华为云实例或手动部署，无公开 Docker 镜像。请参照华为云文档部署后，手动创建兼容模式数据库。
+
+### 6.7 GaussDB A/M 兼容模式数据库创建
+
+需在 GaussDB 或 openGauss 服务端预先创建兼容模式数据库：
 
 ```sql
 -- A 模式（Oracle 兼容）
@@ -279,7 +396,7 @@ CREATE DATABASE testa WITH DBCOMPATIBILITY 'A';
 CREATE DATABASE testm WITH DBCOMPATIBILITY 'M';
 ```
 
-### 6.4 运行单任务
+### 6.8 运行单任务
 
 ```bash
 # PostgreSQL
@@ -295,7 +412,7 @@ CREATE DATABASE testm WITH DBCOMPATIBILITY 'M';
 ./impomysql task ./resources/gaussdb_m_task.json
 ```
 
-### 6.5 运行任务池
+### 6.9 运行任务池
 
 ```bash
 # PostgreSQL 并行测试（4线程）
@@ -305,7 +422,7 @@ CREATE DATABASE testm WITH DBCOMPATIBILITY 'M';
 ./impomysql taskpool ./resources/taskpoolconfig.json
 ```
 
-### 6.6 Bug 稳定性验证
+### 6.10 Bug 稳定性验证
 
 ```bash
 # 单任务重复执行 10 次验证 Bug 是否稳定复现
@@ -315,14 +432,14 @@ CREATE DATABASE testm WITH DBCOMPATIBILITY 'M';
 ./impomysql ckstable taskpool ./resources/taskpoolconfig.json 4 10
 ```
 
-### 6.7 SQL 简化
+### 6.11 SQL 简化
 
 ```bash
 # 简化触发 Bug 的 SQL 语句，便于问题定位
 ./impomysql sqlsim task ./resources/postgresql_task.json
 ```
 
-### 6.8 版本影响验证
+### 6.12 版本影响验证
 
 ```bash
 # 验证 Bug 在特定版本是否受影响
@@ -463,9 +580,14 @@ output/postgresql/task-1/
 | `gcc not found` | 1. `gcc --version` 确认已安装<br>2. 确认 PATH 包含 gcc<br>3. 确认 `CGO_ENABLED=1` |
 | `undefined: pgquery.*` | 1. 确认 `CGO_ENABLED=1`（pg_query_go 含 C 代码）<br>2. 确认 `third_party/pg_query_go/` 存在<br>3. 确认 go.mod replace 指向 `./third_party/pg_query_go` |
 | `cannot find package` | 1. 运行 `go mod tidy`<br>2. 检查 go.mod replace 路径是否正确<br>3. 检查网络（go proxy 访问） |
-| `cgo: C compiler "gcc"` | Windows: 安装 MinGW-w64 并加入 PATH<br>Linux: `apt install gcc` |
+| `cgo: C compiler "gcc"` | Windows: 安装 MinGW-w64 并加入 PATH<br>Linux: Ubuntu `apt install build-essential`；CentOS `yum install gcc glibc-devel` |
+| `undefined reference to pthread_create` | 1. `ldconfig -p | grep pthread` 确认 pthread 库可用<br>2. Ubuntu: `apt install libc6-dev`；CentOS: `yum install glibc-devel`<br>3. 确认 gcc 版本 ≥ 5 |
+| `fatal error: stdlib.h: No such file` | C 标准头文件缺失，Ubuntu: `apt install build-essential`；CentOS: `yum install glibc-devel` |
+| `cc1: unrecognized option '-std=gnu99'` | CentOS 7 默认 gcc 4.8 版本过旧，安装 devtoolset-7: `yum install centos-release-scl && yum install devtoolset-7 && scl enable devtoolset-7 bash` |
+| `go mod download` 网络超时 | 1. 配置 GOPROXY: `go env -w GOPROXY=https://goproxy.cn,direct`<br>2. 验证: `go env GOPROXY` |
+| 编译 OOM 或耗时过长 | 1. pg_query_go 74 个 .c 文件编译较慢属正常<br>2. 低内存: `GOGC=50 CGO_ENABLED=1 go build -o impomysql`<br>3. 检查 `dmesg | grep -i oom` 确认是否有 OOM kill |
 
-### 9.2 运行阶段问题
+### 9.3 运行阶段问题
 
 | 现象 | 排查步骤 |
 |------|----------|
@@ -476,7 +598,7 @@ output/postgresql/task-1/
 | 所有 SQL 被 Stage1 过滤 | 1. 检查 DML 文件是否全是 SELECT<br>2. 检查 `stage1ErrNum` 和 `stage1ExecErrNum`<br>3. 查看 task.log 中 `[Stage1 Error]` 详情 |
 | 无 Bug 检出 | 1. 检查 `stage2UnitNum` 是否 > 0<br>2. 检查 `stage2UnitExecErrNum` 是否过高<br>3. 可能数据库确实无此类漏洞 |
 
-### 9.3 PostgreSQL 特定问题
+### 9.4 PostgreSQL 特定问题
 
 | 现象 | 排查步骤 |
 |------|----------|
@@ -486,14 +608,14 @@ output/postgresql/task-1/
 | TaskPool `CREATE DATABASE` 失败 | 1. 确认连接 postgres 维护库的权限<br>2. 确认 `CREATEDB` 权限已授予用户<br>3. 手动测试: `psql -U tpcc -d postgres -c "CREATE DATABASE pgtest_0"` |
 | 正则变异报错 | PostgreSQL `~` 操作符与 MySQL `REGEXP` 语法不同，使用 pg_query_go 解析 |
 
-### 9.4 GaussDB A 模式特定问题
+### 9.5 GaussDB A 模式特定问题
 
 | 现象 | 排查步骤 |
 |------|----------|
 | `parse error` | 1. 确认数据库是 A 模式（`WITH DBCOMPATIBILITY 'A'`）<br>2. 检查 SQL 是否含 CONNECT BY（会被跳过）<br>3. Oracle 特有函数可能不支持 |
 | ROWNUM 相关错误 | ROWNUM 保留原样执行，需 GaussDB A 原生支持 |
 
-### 9.5 查看详细日志
+### 9.6 查看详细日志
 
 ```bash
 # 查看任务日志
@@ -509,7 +631,7 @@ cat output/postgresql/task-1/bugs/bug-0-3-FixMWhere1U_Pg.json
 tail -f output/postgresql/task-1/task.log
 ```
 
-### 9.6 结果快速诊断脚本
+### 9.7 结果快速诊断脚本
 
 ```bash
 #!/bin/bash
@@ -595,6 +717,8 @@ Pinolo-main/
 
 | 组件 | 版本 | 适用范围 |
 |------|------|----------|
+| Go | 1.20+（最低）/ go.mod 指令 1.25.0 | 编译运行 |
+| CGO | CGO_ENABLED=1（必须） | pg_query_go + go-sqlite3 |
 | TiDB Parser | v5.4.2 (commit d6be9105e6c4) | MySQL/GaussDB M |
 | pg_query_go | v6.0.0 (PostgreSQL 17) | PostgreSQL/GaussDB A |
 | go-sql-driver/mysql | v1.6.0 | MySQL 系列 |
@@ -603,4 +727,4 @@ Pinolo-main/
 
 ---
 
-*文档更新日期：2026-05-21*
+*文档更新日期：2026-05-30*

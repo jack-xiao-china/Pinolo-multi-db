@@ -1,3 +1,11 @@
+## v0.2.2 | 2026-05-30
+- 优化：重写 USER_GUIDE.md Section 3 编译部分——完整 Linux 系统依赖清单（build-essential/glibc-devel）、CGO 编译原理说明、8 步完整编译流程、GOPROXY 配置、网络故障处理
+- 优化：编译问题排查扩展 Linux CGO 错误（pthread、stdlib.h、gnu99、OOM、Go 模块超时等 6 种新增场景）
+- 优化：一键部署脚本修正（Go 版本 URL 可配置、添加 GOPROXY、build-essential 替代 gcc、错误处理）
+- 新增：Section 6 Docker 环境示例——MariaDB、TiDB、OceanBase、openGauss/GaussDB 完整覆盖
+- 优化：Section 9 排查表补充编译阶段 Linux CGO 错误行，修正重复编号
+- 优化：Section 11 版本信息新增 Go 和 CGO 行，更新文档日期
+
 ## v0.2.1 | 2026-05-30
 - 安全：移除 docs 和 resources 中所有真实凭证信息（用户名、密码、IP 地址），替换为占位符 `your_username`/`your_password`/`your_host`
 
