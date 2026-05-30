@@ -1,3 +1,7 @@
+## v0.2.3 | 2026-05-30
+- 安全：`testsqls/testsqls.go` 和 `connector/connector_test.go` 硬编码密码改为环境变量读取（TEST_DB_HOST/TEST_DB_PASSWORD/TEST_DB_PORT 等），默认密码改为 `your_password`
+- 安全：`testsqls/doc.go` Docker 注释中密码替换为 `your_password`
+
 ## v0.2.2 | 2026-05-30
 - 优化：重写 USER_GUIDE.md Section 3 编译部分——完整 Linux 系统依赖清单（build-essential/glibc-devel）、CGO 编译原理说明、8 步完整编译流程、GOPROXY 配置、网络故障处理
 - 优化：编译问题排查扩展 Linux CGO 错误（pthread、stdlib.h、gnu99、OOM、Go 模块超时等 6 种新增场景）
