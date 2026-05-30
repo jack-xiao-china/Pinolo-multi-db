@@ -42,45 +42,20 @@ PINOLO (impomysql) 基于 **Implication Oracle** 方法检测数据库逻辑漏�
 >
 > 本项目**不需要**以下额外系统包：protobuf/protoc、flex/bison、libpq-dev、libssl-dev、libkrb5-dev、pkg-config。pg_query_go 内置了 protobuf-c C 实现和预生成的语法文件；openGauss-connector-go-pq 是纯 Go 驱动，无需 libpq。
 
-### 3.2 初始化第三方依赖
+### 3.2 项目结构说明
 
-```bash
-# 首次编译前，运行初始化脚本
-bash setup_third_party.sh
-```
+本项目已内置所有依赖，支持离线编译：
 
-**脚本功能**：克隆两个仓库到 `third_party/` 目录（go.mod replace 已指向此路径）：
-- `pg_query_go`：从 `github.com/pganalyze` 克隆 v6 分支（shallow clone --depth 1）
-- `openGauss-connector-go-pq`：从 `gitee.com/opengauss` 克隆（shallow clone --depth 1）
-- 脚本会检测已有目录并跳过，可安全重复执行
-- 两个仓库合计约 100MB 磁盘空间
+| 目录 | 内容 | 大小 |
+|------|------|------|
+| `vendor/` | Go 模块依赖源码（pgx、tidb parser 等） | ~60MB |
+| `third_party/` | 本地替换依赖（pg_query_go、openGauss-connector-go-pq） | ~100MB |
 
-如脚本无法执行，可手动克隆：
+克隆项目后无需额外下载依赖，可直接编译。
 
-```bash
-mkdir -p third_party
-git clone --depth 1 https://github.com/pganalyze/pg_query_go.git third_party/pg_query_go
-cd third_party/pg_query_go && git checkout v6 2>/dev/null; cd -
-git clone --depth 1 https://gitee.com/opengauss/openGauss-connector-go-pq.git third_party/openGauss-connector-go-pq
-```
-
-**网络故障处理**：
-- 如果 `github.com` 访问超时（常见于部分网络环境），可配置 git 代理或使用镜像
-- 脚本可重复执行，已克隆的仓库会自动跳过
-- 克隆完成后，验证依赖目录存在：
-  ```bash
-  ls third_party/pg_query_go/parser/parser.go third_party/openGauss-connector-go-pq/go.mod
-  ```
-
-**Go 模块代理配置**（推荐，尤其在中国网络环境下）：
-```bash
-go env -w GOPROXY=https://goproxy.cn,direct
-```
-此配置全局生效，使 `go mod download` 和 `go build` 下载其他依赖（pgx、tidb parser 等）时通过国内代理，显著提升可靠性。
+> **离线环境适用**：项目设计为可完整离线部署。将整个项目目录拷贝到目标机器即可编译运行，无需网络连接。
 
 ### 3.3 Linux 编译
-
-完整编译流程（逐步验证）：
 
 ```bash
 # Step 1: 安装系统依赖
@@ -89,35 +64,28 @@ sudo apt install -y build-essential git
 # CentOS/RHEL:
 sudo yum install -y gcc glibc-devel git
 
-# Step 2: 验证 Go 已安装
+# Step 2: 安装 Go（如未安装）
+# 下载地址: https://go.dev/dl/（选择 linux-amd64 版本）
+wget https://go.dev/dl/go1.24.3.linux-amd64.tar.gz
+sudo tar -C /usr/local -xzf go1.24.3.linux-amd64.tar.gz
+export PATH=$PATH:/usr/local/go/bin
+
+# Step 3: 验证 Go 版本
 go version
-# 期望输出: go1.21+ 或更高版本
-# 如未安装，参见 3.6 一键部署脚本或手动安装
+# 期望: go1.20+ 或更高版本
 
-# Step 3: 配置 GOPROXY（可选，推荐中国用户）
-go env -w GOPROXY=https://goproxy.cn,direct
-
-# Step 4: 初始化第三方依赖
+# Step 4: 进入项目目录并编译（使用 vendor 模式，无需网络）
 cd /path/to/Pinolo-main
-bash setup_third_party.sh
+CGO_ENABLED=1 go build -mod=vendor -o impomysql
 
-# Step 5: 验证第三方依赖目录存在
-ls third_party/pg_query_go/parser/parser.go third_party/openGauss-connector-go-pq/go.mod
-
-# Step 6: 下载 Go 模块依赖
-go mod download
-
-# Step 7: 编译（CGO_ENABLED=1 是必须的）
-CGO_ENABLED=1 go build -o impomysql
-
-# Step 8: 验证编译结果
+# Step 5: 验证编译结果
 ./impomysql
 # 期望输出: 程序因缺少子命令参数退出（正常行为）
 ```
 
-> **编译耗时说明**：pg_query_go 含 74 个 .c 文件，首次编译约 30-60 秒，后续增量编译很快。在内存不足的环境（< 1GB）下可能编译失败，可通过 `GOGC=50` 减少并行度缓解。
+> **编译耗时**：pg_query_go 含 74 个 .c 文件，首次编译约 30-60 秒。内存不足（< 1GB）时可能失败，使用 `GOGC=50 CGO_ENABLED=1 go build -mod=vendor -o impomysql`。
 >
-> **架构限制**：仅 amd64 (x86_64) 架构经过测试。ARM64 (aarch64) 编译需修改 pg_query_go 的 CGO CFLAGS，参见 `third_party/pg_query_go/parser/parser.go`。
+> **架构限制**：仅 amd64 (x86_64) 经过测试。ARM64 需修改 `third_party/pg_query_go/parser/parser.go` 的 CGO CFLAGS。
 
 ### 3.4 Windows 编译
 
@@ -128,7 +96,7 @@ CGO_ENABLED=1 go build -o impomysql
 
 set PATH=C:\mingw64\bin;%PATH%
 set CGO_ENABLED=1
-go build -o impomysql.exe
+go build -mod=vendor -o impomysql.exe
 ```
 
 ### 3.5 编译问题排查
@@ -146,36 +114,23 @@ go build -o impomysql.exe
 | `go mod download` 网络超时 | Go 模块代理不可达 | 配置 GOPROXY: `go env -w GOPROXY=https://goproxy.cn,direct`；验证: `go env GOPROXY` |
 | 编译 OOM 或时间过长（> 5 分钟） | 内存不足或编译环境问题 | 1. pg_query_go 74 个 .c 文件编译较慢属正常<br>2. 低内存环境: `GOGC=50 CGO_ENABLED=1 go build -o impomysql`<br>3. 检查 `dmesg | grep -i oom` 确认是否有 OOM kill |
 
-### 3.6 Linux 一键部署脚本
+### 3.6 快速部署示例
+
+离线环境部署只需 3 步：
 
 ```bash
-#!/bin/bash
-# install_deps.sh - Pinolo Linux 一键部署
-set -e
+# Step 1: 拷贝整个项目目录到目标机器（包含 vendor/ 和 third_party/）
+scp -r Pinolo-main user@target:/path/
 
-# Step 1: 安装系统依赖
-sudo apt install -y build-essential git || sudo yum install -y gcc glibc-devel git
+# Step 2: 安装系统依赖和 Go（目标机器）
+sudo apt install -y build-essential git
+wget https://go.dev/dl/go1.24.3.linux-amd64.tar.gz
+sudo tar -C /usr/local -xzf go1.24.3.linux-amd64.tar.gz
+export PATH=$PATH:/usr/local/go/bin
 
-# Step 2: 安装 Go（如未安装）
-# 请先访问 https://go.dev/dl/ 查看最新稳定版本号
-GO_VERSION="1.24.3"
-if ! command -v go &>/dev/null; then
-    wget -q https://go.dev/dl/go${GO_VERSION}.linux-amd64.tar.gz
-    sudo tar -C /usr/local -xzf go${GO_VERSION}.linux-amd64.tar.gz
-    export PATH=$PATH:/usr/local/go/bin
-    echo 'export PATH=$PATH:/usr/local/go/bin' >> ~/.bashrc
-fi
-go version || { echo "Go 安装失败"; exit 1; }
-
-# Step 3: 配置 GOPROXY（推荐中国用户）
-go env -w GOPROXY=https://goproxy.cn,direct
-
-# Step 4: 初始化依赖 + 编译
-cd /path/to/Pinolo-main
-bash setup_third_party.sh
-# CGO_ENABLED=1 是必须的（pg_query_go 和 go-sqlite3 含 C 代码）
-CGO_ENABLED=1 go build -o impomysql || { echo "编译失败，请检查上方错误信息"; exit 1; }
-echo "编译成功: ./impomysql"
+# Step 3: 编译（vendor 模式，无需网络）
+cd /path/Pinolo-main
+CGO_ENABLED=1 go build -mod=vendor -o impomysql
 ```
 
 ## 4 CLI 命令参考

@@ -1,3 +1,10 @@
+## v0.2.5 | 2026-05-30
+- 新增：vendor 目录纳入版本控制，支持离线编译（`go build -mod=vendor`）
+- 新增：third_party 目录纳入版本控制（pg_query_go、openGauss-connector-go-pq）
+- 优化：USER_GUIDE.md 编译步骤简化为 vendor 模式，无需网络下载依赖
+- 优化：移除 setup_third_party.sh 和 go mod download 步骤
+- 优化：一键部署改为离线部署示例
+
 ## v0.2.4 | 2026-05-30
 - 优化：移除所有 Docker 环境准备内容（USER_GUIDE.md、README.md、POSTGRESQL_SUPPORT.md、CLAUDE.md、testsqls/doc.go、connector/connector_test.go），项目定位为工具本身，被测数据库环境由用户自行指定
 - 优化：USER_GUIDE.md Section 6 简化为"运行示例"，仅保留 GaussDB 兼容模式创建说明和运行命令
