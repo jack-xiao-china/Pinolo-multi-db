@@ -32,6 +32,18 @@ type TaskPoolConfig struct {
 	MaxTimeS    int    `json:"maxTimeS"` // <= 0: no limit
 	DDLPath     string `json:"ddlPath"` // for PostgreSQL/GaussDB
 	DMLPath     string `json:"dmlPath"` // for PostgreSQL/GaussDB
+	// Random SQL generation mode (new feature)
+	GenMode     string `json:"genMode"`
+	GenDepth    int    `json:"genDepth"`
+	GenQueries  int    `json:"genQueries"`
+	GenSeed     int64  `json:"genSeed"`
+	GenJoin     bool   `json:"genJoin"`
+	GenSubquery bool   `json:"genSubquery"`
+	GenUnion    bool   `json:"genUnion"`
+	GenCTE      bool   `json:"genCTE"`
+	GenGroupBy  bool   `json:"genGroupBy"`
+	GenOrderBy  bool   `json:"genOrderBy"`
+	GenLimit    bool   `json:"genLimit"`
 }
 
 // TaskPoolConfig.GetTaskPoolPath:
@@ -270,20 +282,31 @@ func PrepareAndRunTask(config *TaskPoolConfig, logger *logrus.Logger, connPool *
 
 	// 1. create and save task config
 	taskConfig := &TaskConfig{
-		OutputPath: config.OutputPath,
-		DBMS:       config.DBMS,
-		TaskId:     taskId,
-		Host:       conn.Host,
-		Port:       conn.Port,
-		Username:   conn.Username,
-		Password:   conn.Password,
-		DbName:     conn.DbName,
-		Seed:       config.Seed + int64(taskId),
-		RdGenPath:  config.RandGenPath,
-		ZZPath:     config.ZZPath,
-		YYPath:     config.YYPath,
-		QueriesNum: config.QueriesNum,
-		NeedDML:    false,
+		OutputPath:  config.OutputPath,
+		DBMS:        config.DBMS,
+		TaskId:      taskId,
+		Host:        conn.Host,
+		Port:        conn.Port,
+		Username:    conn.Username,
+		Password:    conn.Password,
+		DbName:      conn.DbName,
+		Seed:        config.Seed + int64(taskId),
+		RdGenPath:   config.RandGenPath,
+		ZZPath:      config.ZZPath,
+		YYPath:      config.YYPath,
+		QueriesNum:  config.QueriesNum,
+		NeedDML:     false,
+		GenMode:     config.GenMode,
+		GenDepth:    config.GenDepth,
+		GenQueries:  config.GenQueries,
+		GenSeed:     config.GenSeed,
+		GenJoin:     config.GenJoin,
+		GenSubquery: config.GenSubquery,
+		GenUnion:    config.GenUnion,
+		GenCTE:      config.GenCTE,
+		GenGroupBy:  config.GenGroupBy,
+		GenOrderBy:  config.GenOrderBy,
+		GenLimit:    config.GenLimit,
 	}
 	taskConfig, err := InitTaskConfig(taskConfig)
 	if err != nil {

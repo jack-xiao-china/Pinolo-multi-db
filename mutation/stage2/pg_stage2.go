@@ -77,6 +77,21 @@ func PgImpoMutate(rootNode *pgquery.ParseResult, candidate *PgCandidate, seed in
 		sql, err = doRdMRegExpPgU(rootNode, candidate.Node, seed)
 	case RdMRegExpPgL:
 		sql, err = doRdMRegExpPgL(rootNode, candidate.Node, seed)
+	// EET transformation mutations for PostgreSQL
+	case FixMAndTrueU_Pg:
+		sql, err = doFixMAndTrueU_Pg(rootNode, candidate.Node, seed)
+	case FixMOrFalseL_Pg:
+		sql, err = doFixMOrFalseL_Pg(rootNode, candidate.Node, seed)
+	case FixMCaseTrueU_Pg:
+		sql, err = doFixMCaseTrueU_Pg(rootNode, candidate.Node, seed)
+	case FixMCaseFalseL_Pg:
+		sql, err = doFixMCaseFalseL_Pg(rootNode, candidate.Node, seed)
+	case FixMCaseRandEq_Pg:
+		sql, err = doFixMCaseRandEq_Pg(rootNode, candidate.Node, seed)
+	case FixMAndTrueU_Pg + "_Having":
+		sql, err = doFixMAndTrueU_Pg_Having(rootNode, candidate.Node, seed)
+	case FixMOrFalseL_Pg + "_Having":
+		sql, err = doFixMOrFalseL_Pg_Having(rootNode, candidate.Node, seed)
 	default:
 		return "", errors.New("[PgImpoMutate]unknown mutation name: " + candidate.MutationName)
 	}

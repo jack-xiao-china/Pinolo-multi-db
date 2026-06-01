@@ -1,3 +1,22 @@
+## v0.2.7 | 2026-06-01
+- 新增：EET 变换规则移植到 mutation 引擎，实现 5 种语义等价变换：
+  - `FixMAndTrueU`：WHERE E → WHERE (p OR NOT p OR p IS NULL) AND E（永真式包裹）
+  - `FixMOrFalseL`：WHERE E → WHERE (p AND NOT p AND p IS NOT NULL) OR E（永假式包裹）
+  - `FixMCaseTrueU`：WHERE E → WHERE CASE WHEN TRUE THEN E ELSE rand END
+  - `FixMCaseFalseL`：WHERE E → WHERE CASE WHEN FALSE THEN rand ELSE E END
+  - `FixMCaseRandEq`：WHERE E → WHERE CASE WHEN rand THEN E ELSE E END（等价变换）
+- 新增：MySQL EET mutations（`mutation/stage2/eet_mutations.go` + `eet_mutations_test.go`）
+- 新增：PostgreSQL EET mutations（`mutation/stage2/pg_eet_mutations.go` + `pg_eet_mutations_test.go`）
+- 修复：`testsqls/testsqls.go` getEnvIntOrDefault 函数签名错误（key 参数类型应为 string）
+- 修复：`pg_mutatevisitor.go` UNION 检测条件错误（SETOP_NONE vs SET_OPERATION_UNDEFINED）
+
+## v0.2.6 | 2026-05-30
+- 新增：随机 SQL 生成模式（`genMode: "eet_style"`），基于数据库 schema 发现 + scope-aware 生成，作为第三种运行模式加入（与现有 DDL/DML 文件模式和 go-randgen 模式并存）
+- 新增：`connector/schema.go` SchemaInfo/TableInfo/ColumnInfo 结构体和各 DBMS 的 DiscoverSchema() 方法（MySQL INFORMATION_SCHEMA、PostgreSQL pg_catalog、GaussDB-M/A 适配）
+- 新增：`generator/` 模块——Go 内置 SQL 随机生成器，借鉴 EET scope-based + SQLancer ExpressionGenerator 设计，支持 4 种 SELECT 形状（plain、UNION、CTE、derived table）、JOIN、子查询、GROUP BY/HAVING 等
+- 新增：TaskConfig/TaskPoolConfig 支持 GenMode/GenDepth/GenQueries 等新配置字段，RunTask/PrepareAndRunTask 新增随机生成分支
+- 新增：配置文件示例 `resources/task_gen_config.json` 和 `resources/taskpool_gen_config.json`
+
 ## v0.2.5 | 2026-05-30
 - 新增：vendor 目录纳入版本控制，支持离线编译（`go build -mod=vendor`）
 - 新增：third_party 目录纳入版本控制（pg_query_go、openGauss-connector-go-pq）

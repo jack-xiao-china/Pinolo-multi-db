@@ -1,0 +1,23 @@
+{
+  "outputPath": "./output",
+  "dbms": "mysql",
+  "host": "127.0.0.1",
+  "port": 13306,
+  "username": "root",
+  "password": "your_password",
+  "dbPrefix": "TEST",
+  "seed": 123456,
+  "genMode": "eet_style",
+  "genDepth": 3,
+  "genQueries": 100,
+  "genJoin": true,
+  "genSubquery": true,
+  "genUnion": true,
+  "genCTE": true,
+  "genGroupBy": true,
+  "genOrderBy": true,
+  "genLimit": true,
+  "threadNum": 4,
+  "maxTasks": 16,
+  "maxTimeS": 60
+}

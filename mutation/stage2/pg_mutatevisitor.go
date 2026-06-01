@@ -51,6 +51,24 @@ const (
 	RdMRegExpPgU = "RdMRegExpPgU"
 	// *pgquery.A_Expr (REGEXP/~): '*' -> '+'|'?'
 	RdMRegExpPgL = "RdMRegExpPgL"
+
+	// EET (Equivalent Expression Testing) transformation mutations for PostgreSQL
+	// Inspired by SQLancer's EET Oracle transformation rules
+
+	// Rule 1: E → (p OR NOT p OR p IS NULL) AND E (tautology wrapping)
+	FixMAndTrueU_Pg = "FixMAndTrueU_Pg"
+
+	// Rule 2: E → (p AND NOT p AND p IS NOT NULL) OR E (contradiction wrapping)
+	FixMOrFalseL_Pg = "FixMOrFalseL_Pg"
+
+	// Rule 3: E → CASE WHEN TRUE THEN E ELSE rand END
+	FixMCaseTrueU_Pg = "FixMCaseTrueU_Pg"
+
+	// Rule 4: E → CASE WHEN FALSE THEN rand ELSE E END
+	FixMCaseFalseL_Pg = "FixMCaseFalseL_Pg"
+
+	// Rule 5: E → CASE WHEN rand THEN E ELSE E END
+	FixMCaseRandEq_Pg = "FixMCaseRandEq_Pg"
 )
 
 // PgCandidate: mutation candidate for PostgreSQL AST
@@ -114,8 +132,10 @@ func (v *PgMutateVisitor) visitSelectStmt(sel *pgquery.SelectStmt, flag int) {
 		return
 	}
 
-	// Check if this is a UNION query (Op != SET_OPERATION_UNDEFINED)
-	if sel.Op != pgquery.SetOperation_SET_OPERATION_UNDEFINED {
+	// Check if this is a UNION query (Op != SETOP_NONE)
+	// Note: SETOP_NONE = 1, SET_OPERATION_UNDEFINED = 0 in pg_query enum
+	// Regular SELECT has Op = SETOP_NONE
+	if sel.Op != pgquery.SetOperation_SETOP_NONE && sel.Op != pgquery.SetOperation_SET_OPERATION_UNDEFINED {
 		// This is a UNION/INTERSECT/EXCEPT query
 		v.miningUnionSelectStmt(sel, flag)
 		// Also visit left and right arguments
@@ -344,6 +364,13 @@ func (v *PgMutateVisitor) miningWhereClause(sel *pgquery.SelectStmt, flag int) {
 		v.addPgCandidate(FixMWhere1U_Pg, 1, sel.WhereClause, flag)
 		// FixMWhere0L_Pg: WHERE expr -> WHERE FALSE
 		v.addPgCandidate(FixMWhere0L_Pg, 0, sel.WhereClause, flag)
+
+		// EET transformation mutations for WHERE
+		v.addPgCandidate(FixMAndTrueU_Pg, 1, sel.WhereClause, flag)
+		v.addPgCandidate(FixMOrFalseL_Pg, 0, sel.WhereClause, flag)
+		v.addPgCandidate(FixMCaseTrueU_Pg, 1, sel.WhereClause, flag)
+		v.addPgCandidate(FixMCaseFalseL_Pg, 0, sel.WhereClause, flag)
+		v.addPgCandidate(FixMCaseRandEq_Pg, 1, sel.WhereClause, flag)
 	}
 }
 
@@ -354,6 +381,10 @@ func (v *PgMutateVisitor) miningHavingClause(sel *pgquery.SelectStmt, flag int) 
 		v.addPgCandidate(FixMHaving1U_Pg, 1, sel.HavingClause, flag)
 		// FixMHaving0L_Pg: HAVING expr -> HAVING FALSE
 		v.addPgCandidate(FixMHaving0L_Pg, 0, sel.HavingClause, flag)
+
+		// EET transformation mutations for HAVING
+		v.addPgCandidate(FixMAndTrueU_Pg+"_Having", 1, sel.HavingClause, flag)
+		v.addPgCandidate(FixMOrFalseL_Pg+"_Having", 0, sel.HavingClause, flag)
 	}
 }
 

@@ -3,6 +3,7 @@ package task
 import (
 	"github.com/pkg/errors"
 	"github.com/qaqcatz/impomysql/connector"
+	"github.com/qaqcatz/impomysql/generator"
 	"github.com/qaqcatz/impomysql/mutation/oracle"
 	"github.com/qaqcatz/impomysql/mutation/stage1"
 	"github.com/qaqcatz/impomysql/mutation/stage2"
@@ -57,14 +58,90 @@ func RunTaskPostgreSQL(config *TaskConfig, publicConn *connector.PostgreSQLConne
 		conn = publicConn
 	}
 
-	// 1.5 read ddl, execute ddl
-	logger.Info("init ddl")
-	ddlData, err := ioutil.ReadFile(config.DDLPath)
-	if err != nil {
-		logger.Error("read ddl error: " + err.Error())
-		return nil, errors.Wrap(err, "[RunTaskPostgreSQL]read ddl error")
+	// 1.4b random SQL generation mode
+	if config.GenMode != "" {
+		logger.Info("random SQL generation mode: " + config.GenMode)
+		schemaInfo, err := conn.DiscoverSchema()
+		if err != nil {
+			logger.Error("discover schema error: " + err.Error())
+			return nil, errors.Wrap(err, "[RunTaskPostgreSQL]discover schema error")
+		}
+		if len(schemaInfo.Tables) == 0 {
+			logger.Error("no tables found in database")
+			return nil, errors.New("[RunTaskPostgreSQL]no tables found in database for random generation")
+		}
+
+		genConfig := &generator.GeneratorConfig{
+			Seed:           config.GenSeed,
+			MaxDepth:       config.GenDepth,
+			QueriesNum:     config.GenQueries,
+				Dialect:        config.DBMS,
+			EnableJoin:     config.GenJoin,
+			EnableSubquery: config.GenSubquery,
+			EnableUnion:    config.GenUnion,
+			EnableCTE:      config.GenCTE,
+			EnableGroupBy:  config.GenGroupBy,
+			EnableOrderBy:  config.GenOrderBy,
+			EnableLimit:    config.GenLimit,
+		}
+		if !genConfig.EnableJoin && !genConfig.EnableSubquery && !genConfig.EnableUnion &&
+			!genConfig.EnableCTE && !genConfig.EnableGroupBy {
+			genConfig.EnableJoin = true
+			genConfig.EnableSubquery = true
+			genConfig.EnableUnion = true
+			genConfig.EnableCTE = true
+			genConfig.EnableGroupBy = true
+			genConfig.EnableOrderBy = true
+			genConfig.EnableLimit = true
+		}
+
+		gen := generator.NewQueryGenerator(genConfig, schemaInfo)
+
+		ddlSqls := gen.GenerateDDL()
+		ddlContent := ""
+		for _, sql := range ddlSqls {
+			ddlContent += sql + ";\n"
+		}
+		ddlPath := path.Join(config.GetTaskPath(), "gen_ddl.sql")
+		err = ioutil.WriteFile(ddlPath, []byte(ddlContent), 0777)
+		if err != nil {
+			logger.Error("write ddl error: " + err.Error())
+			return nil, errors.Wrap(err, "[RunTaskPostgreSQL]write generated ddl error")
+		}
+		config.DDLPath = ddlPath
+
+		dmlSqls := gen.GenerateSelects(config.GenQueries)
+		dmlContent := ""
+		for _, sql := range dmlSqls {
+			dmlContent += sql + ";\n"
+		}
+		dmlPath := path.Join(config.GetTaskPath(), "gen_dml.sql")
+		err = ioutil.WriteFile(dmlPath, []byte(dmlContent), 0777)
+		if err != nil {
+			logger.Error("write dml error: " + err.Error())
+			return nil, errors.Wrap(err, "[RunTaskPostgreSQL]write generated dml error")
+		}
+		config.DMLPath = dmlPath
+
+		logger.Info("generated DDL: ", len(ddlSqls), " statements, DML: ", len(dmlSqls), " queries")
 	}
-	ddlSqls := connector.ExtractSQL(string(ddlData))
+
+	// 1.5 read ddl, execute ddl
+	var ddlSqls []*connector.EachSql
+	logger.Info("init ddl")
+	if config.GenMode != "" {
+		ddlData, err := ioutil.ReadFile(config.DDLPath)
+		if err == nil {
+			ddlSqls = connector.ExtractSQL(string(ddlData))
+		}
+		logger.Info("genMode: skip DDL execution (tables already exist), DDL count: ", len(ddlSqls))
+	} else {
+		ddlData, err := ioutil.ReadFile(config.DDLPath)
+		if err != nil {
+			logger.Error("read ddl error: " + err.Error())
+			return nil, errors.Wrap(err, "[RunTaskPostgreSQL]read ddl error")
+		}
+		ddlSqls = connector.ExtractSQL(string(ddlData))
 
 	// Execute DDL (database should already exist)
 	for _, ddlSql := range ddlSqls {
@@ -75,6 +152,7 @@ func RunTaskPostgreSQL(config *TaskConfig, publicConn *connector.PostgreSQLConne
 		}
 	}
 
+		}
 	// 1.6 read dml
 	logger.Info("init dml")
 	dmlData, err := ioutil.ReadFile(config.DMLPath)

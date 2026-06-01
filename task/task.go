@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"github.com/pkg/errors"
 	"github.com/qaqcatz/impomysql/connector"
+	"github.com/qaqcatz/impomysql/generator"
 	"github.com/qaqcatz/impomysql/mutation/oracle"
 	"github.com/qaqcatz/impomysql/mutation/stage1"
 	"github.com/qaqcatz/impomysql/mutation/stage2"
@@ -35,6 +36,19 @@ type TaskConfig struct {
 	YYPath     string `json:"yyPath"`
 	QueriesNum int    `json:"queriesNum"`
 	NeedDML    bool   `json:"needDML"` // output dml.sql or not
+	// Random SQL generation mode (new feature)
+	// If GenMode != "", use built-in SQL generator instead of DDL/DML files or go-randgen
+	GenMode     string `json:"genMode"`     // "" | "eet_style" - generation mode
+	GenDepth    int    `json:"genDepth"`    // expression max depth (default: 3)
+	GenQueries  int    `json:"genQueries"`  // number of SELECT queries to generate
+	GenSeed     int64  `json:"genSeed"`     // generation seed (<=0: use TaskConfig.Seed)
+	GenJoin     bool   `json:"genJoin"`     // enable JOIN generation (default: true)
+	GenSubquery bool   `json:"genSubquery"` // enable subquery generation (default: true)
+	GenUnion    bool   `json:"genUnion"`    // enable UNION generation (default: true)
+	GenCTE      bool   `json:"genCTE"`      // enable WITH/CTE generation (default: true)
+	GenGroupBy  bool   `json:"genGroupBy"`  // enable GROUP BY/HAVING (default: true)
+	GenOrderBy  bool   `json:"genOrderBy"`  // enable ORDER BY (default: true)
+	GenLimit    bool   `json:"genLimit"`    // enable LIMIT (default: true)
 }
 
 // TaskConfig.GetTaskPath:
@@ -104,7 +118,7 @@ func InitTaskConfig(config *TaskConfig) (*TaskConfig, error) {
 	if config.Seed <= 0 {
 		config.Seed = time.Now().UnixNano()
 	}
-	if config.RdGenPath == "" {
+	if config.RdGenPath == "" && config.GenMode == "" {
 		if config.DDLPath == "" {
 			return nil, errors.New("[InitTaskConfig]empty ddlPath")
 		}
@@ -124,7 +138,7 @@ func InitTaskConfig(config *TaskConfig) (*TaskConfig, error) {
 			return nil, errors.Wrap(err, "[InitTaskConfig]path abs error")
 		}
 		config.DMLPath = p
-	} else {
+	} else if config.RdGenPath != "" {
 		p, err := filepath.Abs(config.RdGenPath)
 		if err != nil {
 			return nil, errors.Wrap(err, "[InitTaskConfig]path abs error")
@@ -158,7 +172,19 @@ func InitTaskConfig(config *TaskConfig) (*TaskConfig, error) {
 		// set TaskConfig.DDLPath = TaskConfig.GetTaskPath()/output.data.sql
 		config.DDLPath = path.Join(config.GetTaskPath(), "output.data.sql")
 		// set TaskConfig.DMLPath = TaskConfig.GetTaskPath()/output.rand.sql.
-		config.DMLPath = path.Join(config.GetTaskPath(), "output.rand.sql")
+			config.DMLPath = path.Join(config.GetTaskPath(), "output.rand.sql")
+	} else if config.GenMode != "" {
+		// Random SQL generation mode - validate and set defaults
+		if config.GenQueries <= 0 {
+			config.GenQueries = 100
+		}
+		if config.GenDepth <= 0 {
+			config.GenDepth = 3
+		}
+		if config.GenSeed <= 0 {
+			config.GenSeed = config.Seed
+		}
+		// DDL/DML paths will be set in RunTask after generation
 	}
 	return config, nil
 }
@@ -278,18 +304,104 @@ func RunTask(config *TaskConfig, publicConn *connector.Connector, publicLogger *
 		}
 	}
 
+		// 1.4b random SQL generation mode
+		if config.GenMode != "" {
+			logger.Info("random SQL generation mode: " + config.GenMode)
+			// Discover schema from database
+			schemaInfo, err := conn.DiscoverSchema()
+			if err != nil {
+				logger.Error("discover schema error: " + err.Error())
+				return nil, errors.Wrap(err, "[RunTask]discover schema error")
+			}
+			if len(schemaInfo.Tables) == 0 {
+				logger.Error("no tables found in database")
+				return nil, errors.New("[RunTask]no tables found in database for random generation")
+			}
+
+			// Create generator config
+			genConfig := &generator.GeneratorConfig{
+				Seed:           config.GenSeed,
+				MaxDepth:       config.GenDepth,
+				QueriesNum:     config.GenQueries,
+					Dialect:        config.DBMS,
+				EnableJoin:     config.GenJoin,
+				EnableSubquery: config.GenSubquery,
+				EnableUnion:    config.GenUnion,
+				EnableCTE:      config.GenCTE,
+				EnableGroupBy:  config.GenGroupBy,
+				EnableOrderBy:  config.GenOrderBy,
+				EnableLimit:    config.GenLimit,
+			}
+			// When GenMode is active but feature toggles are all false (default JSON),
+			// enable all features for maximum coverage
+			if !genConfig.EnableJoin && !genConfig.EnableSubquery && !genConfig.EnableUnion &&
+				!genConfig.EnableCTE && !genConfig.EnableGroupBy {
+				genConfig.EnableJoin = true
+				genConfig.EnableSubquery = true
+				genConfig.EnableUnion = true
+				genConfig.EnableCTE = true
+				genConfig.EnableGroupBy = true
+				genConfig.EnableOrderBy = true
+				genConfig.EnableLimit = true
+			}
+
+			gen := generator.NewQueryGenerator(genConfig, schemaInfo)
+
+			// Generate DDL and write to file
+			ddlSqls := gen.GenerateDDL()
+			ddlContent := ""
+			for _, sql := range ddlSqls {
+				ddlContent += sql + ";\n"
+			}
+			ddlPath := path.Join(config.GetTaskPath(), "gen_ddl.sql")
+			err = ioutil.WriteFile(ddlPath, []byte(ddlContent), 0777)
+			if err != nil {
+				logger.Error("write ddl error: " + err.Error())
+				return nil, errors.Wrap(err, "[RunTask]write generated ddl error")
+			}
+			config.DDLPath = ddlPath
+
+			// Generate DML (SELECT queries) and write to file
+			dmlSqls := gen.GenerateSelects(config.GenQueries)
+			dmlContent := ""
+			for _, sql := range dmlSqls {
+				dmlContent += sql + ";\n"
+			}
+			dmlPath := path.Join(config.GetTaskPath(), "gen_dml.sql")
+			err = ioutil.WriteFile(dmlPath, []byte(dmlContent), 0777)
+			if err != nil {
+				logger.Error("write dml error: " + err.Error())
+				return nil, errors.Wrap(err, "[RunTask]write generated dml error")
+			}
+			config.DMLPath = dmlPath
+
+			logger.Info("generated DDL: ", len(ddlSqls), " statements, DML: ", len(dmlSqls), " queries")
+		}
+
 	// 1.5 read ddl, init database, execute ddl
+	var ddlSqls []*connector.EachSql
 	logger.Info("init ddl")
-	ddlData, err := ioutil.ReadFile(config.DDLPath)
-	if err != nil {
-		logger.Error("read ddl error: " + err.Error())
-		return nil, errors.Wrap(err, "[RunTask]read ddl error")
-	}
-	ddlSqls := connector.ExtractSQL(string(ddlData))
-	err = conn.InitDBWithDDL(ddlSqls)
-	if err != nil {
-		logger.Error("init ddl sqls error: " + err.Error())
-		return nil, err
+	if config.GenMode != "" {
+		// In random generation mode, tables already exist in the database.
+		// DDL file is written for record only, not executed.
+		// Read the generated DDL file to count statements for TaskResult.
+		ddlData, err := ioutil.ReadFile(config.DDLPath)
+		if err == nil {
+			ddlSqls = connector.ExtractSQL(string(ddlData))
+		}
+		logger.Info("genMode: skip DDL execution (tables already exist), DDL count: ", len(ddlSqls))
+	} else {
+		ddlData, err := ioutil.ReadFile(config.DDLPath)
+		if err != nil {
+			logger.Error("read ddl error: " + err.Error())
+			return nil, errors.Wrap(err, "[RunTask]read ddl error")
+		}
+		ddlSqls = connector.ExtractSQL(string(ddlData))
+		err = conn.InitDBWithDDL(ddlSqls)
+		if err != nil {
+			logger.Error("init ddl sqls error: " + err.Error())
+			return nil, err
+		}
 	}
 	// 1.6 read dml
 	logger.Info("init dml")

@@ -142,3 +142,19 @@ func (uc *UniversalConnector) Close() {
 func (uc *UniversalConnector) GetDBType() DBType {
 	return uc.DBType
 }
+
+// DiscoverSchema: discover database schema (implements SchemaDiscoverer)
+func (uc *UniversalConnector) DiscoverSchema() (*SchemaInfo, error) {
+	switch uc.DBType {
+	case DBMySQL:
+		return uc.mysqlConn.DiscoverSchema()
+	case DBPostgreSQL:
+		return uc.pgConn.DiscoverSchema()
+	case DBOpenGaussM, DBGaussDBM:
+		return uc.ogConn.DiscoverSchema()
+	case DBOpenGaussA, DBGaussDBA:
+		return uc.gaConn.DiscoverSchema()
+	default:
+		return nil, errors.New(fmt.Sprintf("[UniversalConnector.DiscoverSchema]unsupported database type: %s", uc.DBType))
+	}
+}

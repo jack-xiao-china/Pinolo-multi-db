@@ -30,6 +30,11 @@ import (
 //	 RdMLikeL
 //	 RdMRegExpU
 //	 RdMRegExpL
+//	 FixMAndTrueU     (EET tautology wrapping)
+//	 FixMOrFalseL     (EET contradiction wrapping)
+//	 FixMCaseTrueU    (EET CASE WHEN TRUE)
+//	 FixMCaseFalseL   (EET CASE WHEN FALSE)
+//	 FixMCaseRandEq   (EET CASE WHEN rand)
 //
 // about the prefix {FixM|RdM}(currently not working):
 //   FixM means fixed mutation;
@@ -95,6 +100,17 @@ func ImpoMutate(rootNode ast.Node, candidate *Candidate, seed int64) (string, er
 		sql, err = doRdMRegExpU(rootNode, candidate.Node, seed)
 	case RdMRegExpL:
 		sql, err = doRdMRegExpL(rootNode, candidate.Node, seed)
+	// EET transformation mutations
+	case FixMAndTrueU:
+		sql, err = doFixMAndTrueU(rootNode, candidate.Node, seed)
+	case FixMOrFalseL:
+		sql, err = doFixMOrFalseL(rootNode, candidate.Node, seed)
+	case FixMCaseTrueU:
+		sql, err = doFixMCaseTrueU(rootNode, candidate.Node, seed)
+	case FixMCaseFalseL:
+		sql, err = doFixMCaseFalseL(rootNode, candidate.Node, seed)
+	case FixMCaseRandEq:
+		sql, err = doFixMCaseRandEq(rootNode, candidate.Node, seed)
 	}
 	if err != nil {
 		return "", err

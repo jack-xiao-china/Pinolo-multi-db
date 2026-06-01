@@ -525,6 +525,12 @@ func (v *MutateVisitor) miningSelectStmt(in *ast.SelectStmt, flag int) {
 	v.addFixMHaving1U(in, flag)
 	// FixMHaving0L
 	v.addFixMHaving0L(in, flag)
+	// EET transformation mutations for WHERE
+	v.addFixMAndTrueU(in, flag)
+	v.addFixMOrFalseL(in, flag)
+	v.addFixMCaseTrueU(in, flag)
+	v.addFixMCaseFalseL(in, flag)
+	v.addFixMCaseRandEq(in, flag)
 }
 
 func (v *MutateVisitor) miningJoin(in *ast.Join, flag int) {

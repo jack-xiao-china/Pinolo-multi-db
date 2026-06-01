@@ -630,3 +630,73 @@ Pinolo-main/
 ---
 
 *文档更新日期：2026-05-30*
+
+**EET 变异（5 种新增）**：
+
+| 名称 | 变异 | 方向 |
+|------|------|------|
+| FixMAndTrueU_Pg | WHERE E → WHERE (p OR NOT p OR p IS NULL) AND E | 上 |
+| FixMOrFalseL_Pg | WHERE E → WHERE (p AND NOT p AND p IS NOT NULL) OR E | 下 |
+| FixMCaseTrueU_Pg | WHERE E → CASE WHEN TRUE THEN E ELSE rand END | 上 |
+| FixMCaseFalseL_Pg | WHERE E → CASE WHEN FALSE THEN rand ELSE E END | 下 |
+| FixMCaseRandEq_Pg | WHERE E → CASE WHEN rand THEN E ELSE E END | 等价 |
+
+
+## 9 Random SQL 生成模式
+
+Pinolo 支持随机 SQL 生成模式， 作为第三种运行模式（与 DDL/DML 文件模式和 go-randgen 模式并存）。 通过数据库 schema 发现自动生成测试 SQL，### 配置示例
+
+```json
+{
+  "outputPath": "./output",
+  "dbms": "postgresql",
+  "taskId": 1,
+  "host": "localhost",
+  "port": 5432,
+  "username": "your_username",
+  "password": "your_password",
+  "dbname": "test_eet",
+  "seed": 123456,
+  "genMode": "eet_style",
+  "genDepth": 3,
+  "genQueries": 100
+  "genJoin": true,
+  "genSubquery": true
+  "genUnion": true,
+  "genCTE": true,
+  "genGroupBy": true
+}
+```
+
+### 字段说明
+
+| 字段 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| `outputPath` | string | 否 | 输出目录 |
+| `dbms` | string | 是 | 数据库类型 |
+| `taskId` | int | 是 | 任务 ID |
+| `host` | string | 是 | 数据库主机 |
+| `port` | int | 是 | 数据库端口 |
+| `username` | string | 是 | 用户名 |
+| `password` | string | 是 | 密码 |
+| `dbname` | string | 是 | 数据库名（需已存在且 |
+| `seed` | int64 | 否 | 生成种子，| `genMode` | string | 是 | 生成模式: `eet_style` |
+| `genDepth` | int | 否 | 表达式最大深度（默认 3) |
+| `genQueries` | int | 是 | 生成 SQL 数量 |
+| `genJoin` | bool | 否 | 是否生成 JOIN（默认 true) |
+| `genSubquery` | bool | 否 | 是否生成子查询(默认 true) |
+| `genUnion` | bool | 否 | 是否生成 UNION(默认 true) |
+| `genCTE` | bool | 否 | 是否生成 CTE/WITH(默认 true) |
+| `genGroupBy` | bool | 否 | 是否生成 GROUP BY(默认 true) |
+
+### 运行示例
+
+```bash
+# MySQL 生成模式测试
+./impomysql task ./resources/task_gen_config.json
+
+# PostgreSQL 生成模式测试(需预先创建 test 数据库)
+PGPASSWORD='your_password' psql -h localhost -U your_username -d postgres -c "CREATE DATABASE test_eet;"
+./impomysql task ./resources/temp_test_pg.json
+```
+

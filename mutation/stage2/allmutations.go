@@ -47,9 +47,33 @@ const (
 	RdMRegExpU = "RdMRegExpU"
 	// *ast.PatternRegexpExpr: '*' -> '+'|'?'
 	RdMRegExpL = "RdMRegExpL"
+
+	// EET (Equivalent Expression Testing) transformation mutations
+	// Inspired by SQLancer's EET Oracle transformation rules
+
+	// Rule 1: E → (p OR NOT p OR p IS NULL) AND E (tautology wrapping)
+	// The left side is always TRUE (three-valued logic), so E's result set is contained in mutated result set.
+	FixMAndTrueU = "FixMAndTrueU"
+
+	// Rule 2: E → (p AND NOT p AND p IS NOT NULL) OR E (contradiction wrapping)
+	// The left side is always FALSE, so mutated result set equals E's result set.
+	// Under Implication Oracle: original ⊇ mutated (shrinking)
+	FixMOrFalseL = "FixMOrFalseL"
+
+	// Rule 4: E → CASE WHEN TRUE THEN E ELSE rand END (true branch wrapping)
+	// Always evaluates to E. Under Implication Oracle: mutated ⊇ original (expanding)
+	FixMCaseTrueU = "FixMCaseTrueU"
+
+	// Rule 3: E → CASE WHEN FALSE THEN rand ELSE E END (false branch wrapping)
+	// Always evaluates to E. Under Implication Oracle: original ⊇ mutated (shrinking)
+	FixMCaseFalseL = "FixMCaseFalseL"
+
+	// Rule 5/6: E → CASE WHEN rand THEN E ELSE E END (random branch, semantically equivalent)
+	// Theoretically: both branches return E, so result should be identical.
+	// If not identical → bug detected. This is an "equivalence" mutation.
+	FixMCaseRandEq = "FixMCaseRandEq"
 )
 
-// discard the following mutation! false positive caused by type conversion:
 // 1. --------------------------------------------------
 // *ast.BinaryOperationExpr:
 //

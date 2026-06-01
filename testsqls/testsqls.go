@@ -35,7 +35,7 @@ func getEnvOrDefault(key, defaultVal string) string {
 	return defaultVal
 }
 
-func getEnvIntOrDefault(key, defaultVal int) int {
+func getEnvIntOrDefault(key string, defaultVal int) int {
 	if val := os.Getenv(key); val != "" {
 		if intVal, err := strconv.Atoi(val); err == nil {
 			return intVal
