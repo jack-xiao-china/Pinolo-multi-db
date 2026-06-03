@@ -8,7 +8,9 @@ import (
 	"reflect"
 )
 
-// addFixMCmpOpL: FixMCmpOpL, *ast.BinaryOperationExpr, *ast.CompareSubqueryExpr: a {>=|<=|!=} b -> a {>|<} b
+// addFixMCmpOpL: FixMCmpOpL, *ast.BinaryOperationExpr, *ast.CompareSubqueryExpr: a {>=|<=} b -> a {>|<} b
+// NOTE: NE(!=) is NOT included because != -> < has no valid containment relationship.
+// a!=b being TRUE does not imply a<b being TRUE (e.g., a=5, b=3: 5!=3 is TRUE but 5<3 is FALSE).
 func (v *MutateVisitor) addFixMCmpOpL(in ast.Node, flag int) {
 	var myOp *opcode.Op = nil
 	switch in.(type) {
@@ -24,7 +26,6 @@ func (v *MutateVisitor) addFixMCmpOpL(in ast.Node, flag int) {
 	switch *myOp {
 	case opcode.LE:
 	case opcode.GE:
-	case opcode.NE:
 	default:
 		return
 	}
@@ -55,10 +56,8 @@ func doFixMCmpOpL(rootNode ast.Node, in ast.Node) ([]byte, error) {
 		newOp = opcode.LT
 	case opcode.GE:
 		newOp = opcode.GT
-	case opcode.NE:
-		newOp = opcode.LT
 	default:
-		return nil, errors.New("[doFixMCmpOpL]Op default " + oldOp.String())
+		return nil, errors.New("[doFixMCmpOpL]unsupported Op " + oldOp.String())
 	}
 	// mutate
 	*myOp = newOp
@@ -69,4 +68,41 @@ func doFixMCmpOpL(rootNode ast.Node, in ast.Node) ([]byte, error) {
 	// recover
 	*myOp = oldOp
 	return sql, nil
+}
+// addFixMNullEqToLowerL: FixMNullEqToLowerL, *ast.BinaryOperationExpr: a <=> b -> a = b
+// Implication (lower mutation): a=b TRUE ⊆ a<=>b TRUE (normal equality is a subset of NULL-safe equality)
+// <=> matches NULL=NULL as TRUE, while = returns NULL. So <=> gives more TRUE rows.
+func (v *MutateVisitor) addFixMNullEqToLowerL(in *ast.BinaryOperationExpr, flag int) {
+	if in != nil && in.Op == opcode.NullEQ && in.L != nil && in.R != nil {
+		v.addCandidate(FixMNullEqToLowerL, 0, in, flag)
+	}
+}
+
+// doFixMNullEqToLowerL: FixMNullEqToLowerL, a <=> b -> a = b
+func doFixMNullEqToLowerL(rootNode ast.Node, in ast.Node) ([]byte, error) {
+	switch in.(type) {
+	case *ast.BinaryOperationExpr:
+		expr := in.(*ast.BinaryOperationExpr)
+		if expr.Op != opcode.NullEQ {
+			return nil, errors.New("[FixMNullEqToLowerL]expected NullEQ operator")
+		}
+
+		oldOp := expr.Op
+		// Mutate: <=> -> =
+		expr.Op = opcode.EQ
+
+		sql, err := restore(rootNode)
+		if err != nil {
+			expr.Op = oldOp
+			return nil, errors.Wrap(err, "[FixMNullEqToLowerL]restore error")
+		}
+
+		// Recover
+		expr.Op = oldOp
+		return sql, nil
+	case nil:
+		return nil, errors.New("[FixMNullEqToLowerL]type nil")
+	default:
+		return nil, errors.New("[FixMNullEqToLowerL]type default " + reflect.TypeOf(in).String())
+	}
 }

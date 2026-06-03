@@ -109,8 +109,16 @@ func RunTaskGaussDB(config *TaskConfig, publicLogger *logrus.Logger) (*TaskResul
 			cur += 1
 		}
 
-		// 2.1 stage1.InitAndExec
-		stage1Result := stage1.InitAndExec(dmlSql.Sql, conn)
+		// 2.1 stage1.InitAndExecForMMode
+		stage1Result := stage1.InitAndExecForMMode(dmlSql.Sql, conn)
+
+		// Handle skipped SQL (M-mode unsupported syntax)
+		if stage1Result.Skipped {
+			taskResult.Stage1SkippedNum += 1
+			logger.Info("[Skipped] sqlId = ", dmlSql.Id, " reason: ", stage1Result.SkipReason)
+			continue
+		}
+
 		// handle stage1 error
 		if stage1Result.Err != nil {
 			taskResult.Stage1ErrNum += 1
@@ -125,8 +133,8 @@ func RunTaskGaussDB(config *TaskConfig, publicLogger *logrus.Logger) (*TaskResul
 		originalSql := stage1Result.InitSql
 		originalResult := stage1Result.ExecResult
 
-		// 2.2 stage2.MutateAllAndExec
-		stage2Result := stage2.MutateAllAndExec(originalSql, config.Seed+int64(i), conn)
+		// 2.2 stage2.MutateAllAndExecForMMode
+		stage2Result := stage2.MutateAllAndExecForMMode(originalSql, config.Seed+int64(i), conn)
 		// handle stage2 error
 		if stage2Result.Err != nil {
 			taskResult.Stage2ErrNum += 1
@@ -151,10 +159,18 @@ func RunTaskGaussDB(config *TaskConfig, publicLogger *logrus.Logger) (*TaskResul
 			mutatedSql := mutateUnit.Sql
 			mutatedResult := mutateUnit.ExecResult
 
-			//   2.3 use oracle.Check to detect logical bugs
-			check, err := oracle.Check(originalResult, mutatedResult, isUpper)
-			if err != nil {
-				return nil, err
+			//   2.3 use oracle to detect logical bugs
+			// For equivalence mutations, use CheckEquivalence (result sets should be identical)
+			// For implication mutations, use Check (result containment relationship)
+			var check bool
+			var oracleErr error
+			if mutateUnit.IsEquivalence {
+				check, oracleErr = oracle.CheckEquivalence(originalResult, mutatedResult)
+			} else {
+				check, oracleErr = oracle.Check(originalResult, mutatedResult, isUpper)
+			}
+			if oracleErr != nil {
+				return nil, oracleErr
 			}
 			if !check {
 				// logical bug!!!

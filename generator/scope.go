@@ -2,6 +2,7 @@ package generator
 
 import (
 	"github.com/qaqcatz/impomysql/connector"
+	"math/rand"
 )
 
 // Scope: tracks available tables, columns, and type information during SQL generation
@@ -91,6 +92,33 @@ func (s *Scope) NumColumns() int {
 	return len(s.Columns)
 }
 
+// EnumColumns: return column references that are ENUM type
+func (s *Scope) EnumColumns() []ColumnRef {
+	result := make([]ColumnRef, 0)
+	for _, col := range s.Columns {
+		if normalizeType(col.ColumnType) == "enum" {
+			result = append(result, col)
+		}
+	}
+	return result
+}
+
+// PickEnumValue: pick a random value from a random ENUM column in the scope
+// Returns ("'value'", true) if found, ("", false) if no ENUM columns available
+func (s *Scope) PickEnumValue(r *rand.Rand) (string, bool) {
+	enumCols := s.EnumColumns()
+	if len(enumCols) == 0 {
+		return "", false
+	}
+	col := pickRandom(r, enumCols)
+	values := parseEnumValues(col.ColumnType)
+	if len(values) == 0 {
+		return "", false
+	}
+	val := pickRandom(r, values)
+	return "'" + val + "'", true
+}
+
 // typeMatch: check if a column type matches a type constraint
 // Uses broad category matching for flexibility
 func typeMatch(actualType string, constraint string) bool {
@@ -110,7 +138,7 @@ func typeMatch(actualType string, constraint string) bool {
 	case "float":
 		return actual == "float" || actual == "double" || actual == "decimal" || actual == "numeric"
 	case "string":
-		return actual == "varchar" || actual == "char" || actual == "text" || actual == "longtext" || actual == "mediumtext" || actual == "tinytext"
+		return actual == "varchar" || actual == "char" || actual == "text" || actual == "longtext" || actual == "mediumtext" || actual == "tinytext" || actual == "enum"
 	case "bool":
 		return actual == "tinyint" || actual == "bool" || actual == "boolean"
 	}
@@ -119,6 +147,7 @@ func typeMatch(actualType string, constraint string) bool {
 
 // normalizeType: normalize a column type string to a base type name
 // e.g., "varchar(20)" → "varchar", "int(11)" → "int", "bigint(20)" → "bigint"
+// "enum('a','b','c')" → "enum"
 func normalizeType(colType string) string {
 	// Remove parentheses content: varchar(20) → varchar, int(11) → int
 	for i := 0; i < len(colType); i++ {
@@ -127,4 +156,49 @@ func normalizeType(colType string) string {
 		}
 	}
 	return colType
+}
+
+// parseEnumValues: extract values from an ENUM column type string
+// "enum('a','b','c')" → ["a", "b", "c"]
+// Returns nil if the type is not an ENUM
+func parseEnumValues(colType string) []string {
+	if len(colType) < 6 || colType[:4] != "enum" {
+		return nil
+	}
+	// Find the opening paren
+	start := -1
+	for i := 0; i < len(colType); i++ {
+		if colType[i] == '(' {
+			start = i + 1
+			break
+		}
+	}
+	if start < 0 {
+		return nil
+	}
+	// Parse quoted values: 'val1','val2','val3'
+	values := make([]string, 0)
+	inQuote := false
+	current := ""
+	for i := start; i < len(colType); i++ {
+		ch := colType[i]
+		if ch == '\'' {
+			if inQuote {
+				// End of quoted value
+				values = append(values, current)
+				current = ""
+				inQuote = false
+			} else {
+				inQuote = true
+			}
+		} else if inQuote {
+			current += string(ch)
+		} else if ch == ')' {
+			break
+		}
+	}
+	if len(values) == 0 {
+		return nil
+	}
+	return values
 }

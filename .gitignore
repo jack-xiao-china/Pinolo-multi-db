@@ -19,6 +19,7 @@ go.work
 
 # Output directory
 output/
+output_pg_eet_test/
 
 # IDE
 .idea/
@@ -29,6 +30,9 @@ output/
 # OS
 .DS_Store
 Thumbs.db
+
+# Claude Code local settings (user-specific, not team-shared)
+.claude/settings.local.json
 
 # Logs
 *.log
@@ -51,6 +55,9 @@ resources/gaussdb_m_task.json
 resources/opengauss_m_task.json
 resources/postgresql_task.json
 resources/postgresql_taskpool.json
+
+# Integration test env file (contains real DB credentials)
+test_db.env
 
 # Third-party local dependencies (too large for git history, user must copy manually)
 # See setup_third_party.sh for initialization

@@ -38,8 +38,14 @@ func (g *QueryGenerator) generateExpression(scope *Scope, depth int, typeConstra
 	return g.generateInExpr(scope, depth)
 }
 
-// generateLeaf: generate a leaf expression (column reference or constant)
+// generateLeaf: generate a leaf expression (column reference, constant, or ENUM value)
 func (g *QueryGenerator) generateLeaf(scope *Scope, typeConstraint string) string {
+	// Try ENUM value if scope has ENUM columns (for MySQL dialect only)
+	if g.isMySQLDialect() && (typeConstraint == "" || typeConstraint == "any" || typeConstraint == "string" || typeConstraint == "enum") {
+		if enumVal, ok := scope.PickEnumValue(g.Rand); ok && g.d6() <= 2 {
+			return enumVal
+		}
+	}
 	if g.randBool() && scope.NumColumns() > 0 {
 		return g.generateColumnRefExpr(scope, typeConstraint)
 	}
@@ -66,7 +72,7 @@ func (g *QueryGenerator) generateConstantExpr(typeConstraint string) string {
 		return fmt.Sprintf("%d", g.randInt(-100, 100))
 	case "float", "double", "decimal", "numeric", "float4", "float8", "double precision":
 		return fmt.Sprintf("%.2f", float64(g.randInt(-100, 100))/10.0)
-	case "varchar", "char", "text", "bpchar", "varchar(20)", "varchar(50)", "name":
+	case "varchar", "char", "text", "bpchar", "varchar(20)", "varchar(50)", "name", "enum":
 		return fmt.Sprintf("'str_%d'", g.randInt(0, 999))
 	case "bool", "boolean":
 		if g.isMySQLDialect() {

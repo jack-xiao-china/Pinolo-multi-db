@@ -92,6 +92,30 @@ func PgImpoMutate(rootNode *pgquery.ParseResult, candidate *PgCandidate, seed in
 		sql, err = doFixMAndTrueU_Pg_Having(rootNode, candidate.Node, seed)
 	case FixMOrFalseL_Pg + "_Having":
 		sql, err = doFixMOrFalseL_Pg_Having(rootNode, candidate.Node, seed)
+		case FixMDeMorganAnd_Pg:
+			sql, err = doFixMDeMorganAnd_Pg(rootNode, candidate.Node, seed)
+		case FixMDeMorganOr_Pg:
+			sql, err = doFixMDeMorganOr_Pg(rootNode, candidate.Node, seed)
+		case FixMBetweenToCmp_Pg:
+			sql, err = doFixMBetweenToCmp_Pg(rootNode, candidate.Node, seed)
+		case FixMBetweenDropUpperU_Pg:
+			sql, err = doFixMBetweenDropUpperU_Pg(rootNode, candidate.Node, seed)
+		case FixMBetweenDropLowerU_Pg:
+			sql, err = doFixMBetweenDropLowerU_Pg(rootNode, candidate.Node, seed)
+		case FixMCoalesceToCase_Pg:
+			sql, err = doFixMCoalesceToCase_Pg(rootNode, candidate.Node, seed)
+		case FixMNullifToCase_Pg:
+			sql, err = doFixMNullifToCase_Pg(rootNode, candidate.Node, seed)
+		case FixMExistsToIn_Pg:
+			sql, err = doFixMExistsToIn_Pg(rootNode, candidate.Node, seed)
+		case FixMInToExists_Pg:
+			sql, err = doFixMInToExists_Pg(rootNode, candidate.Node, seed)
+		case FixMAllToAnyU_Pg:
+			sql, err = doFixMAllToAnyU_Pg(rootNode, candidate.Node, seed)
+		case FixMAnyToAllL_Pg:
+			sql, err = doFixMAnyToAllL_Pg(rootNode, candidate.Node, seed)
+		case FixMIsNotDistinctFromToLowerL_Pg:
+			sql, err = doFixMIsNotDistinctFromToLowerL_Pg(rootNode, candidate.Node, seed)
 	default:
 		return "", errors.New("[PgImpoMutate]unknown mutation name: " + candidate.MutationName)
 	}
@@ -117,6 +141,7 @@ type PgMutateUnit struct {
 	Name       string
 	Sql        string
 	IsUpper    bool
+	IsEquivalence bool // true for EET semantic rewrite mutations (use CheckEquivalence oracle)
 	Err        error
 	ExecResult *connector.Result
 }
@@ -145,11 +170,12 @@ func MutateAllForPostgreSQL(sql string, seed int64) *PgMutateResult {
 		for _, candidate := range candidateList {
 			newSql, err := PgImpoMutate(root, candidate, seed)
 			mutateResult.MutateUnits = append(mutateResult.MutateUnits, &PgMutateUnit{
-				Name:       mutationName,
-				Sql:        newSql,
-				IsUpper:    ((candidate.U ^ candidate.Flag) ^ 1) == 1,
-				Err:        err,
-				ExecResult: nil,
+				Name:           mutationName,
+				Sql:            newSql,
+				IsUpper:        ((candidate.U ^ candidate.Flag) ^ 1) == 1,
+				IsEquivalence:  isEquivalenceMutationPg(mutationName),
+				Err:            err,
+				ExecResult:     nil,
 			})
 		}
 	}

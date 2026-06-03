@@ -17,6 +17,7 @@ type GeneratorConfig struct {
 	Dialect    string // SQL dialect: "mysql", "postgresql", "gaussdb_a"
 	// Feature toggles (default: all true for maximum coverage)
 	EnableJoin     bool // Generate JOINs in FROM clause
+	EnableSelfJoin bool // Generate self-joins (same table with different aliases)
 	EnableSubquery bool // Generate subqueries (derived tables, EXISTS, IN)
 	EnableUnion    bool // Generate UNION/UNION ALL queries
 	EnableCTE      bool // Generate WITH/CTE queries
@@ -32,6 +33,7 @@ func DefaultGeneratorConfig() *GeneratorConfig {
 		MaxDepth:       3,
 		QueriesNum:     100,
 		EnableJoin:     true,
+		EnableSelfJoin: true,
 		EnableSubquery: true,
 		EnableUnion:    true,
 		EnableCTE:      true,

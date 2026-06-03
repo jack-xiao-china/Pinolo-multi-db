@@ -23,3 +23,17 @@ func Check(originResult *connector.Result, mutatedResult *connector.Result, isUp
 	}
 	return false, nil
 }
+
+// CheckEquivalence: check if two result sets are semantically equivalent.
+// Used for EET semantic rewrite mutations (De Morgan, BETWEEN→Cmp, COALESCE→CASE, NULLIF→CASE).
+// These transformations should produce identical result sets.
+// If the result sets differ → logical bug detected.
+// Returns true if equivalent (no bug), false if not equivalent (bug).
+func CheckEquivalence(originResult *connector.Result, mutatedResult *connector.Result) (bool, error) {
+	cmp, err := originResult.CMP(mutatedResult)
+	if err != nil {
+		return false, err
+	}
+	// cmp == 0 means the result sets are identical → no bug
+	return cmp == 0, nil
+}

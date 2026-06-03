@@ -72,6 +72,70 @@ const (
 	// Theoretically: both branches return E, so result should be identical.
 	// If not identical → bug detected. This is an "equivalence" mutation.
 	FixMCaseRandEq = "FixMCaseRandEq"
+
+	// EET semantic rewrite mutations (equivalence class)
+	// Inspired by SQLancer's EET Oracle semantic rewrite rules
+
+	// De Morgan's Law: (A AND B) → NOT(NOT(A) OR NOT(B))
+	// Semantically equivalent. If not identical → bug detected.
+	FixMDeMorganAnd = "FixMDeMorganAnd"
+
+	// De Morgan's Law: (A OR B) → NOT(NOT(A) AND NOT(B))
+	// Semantically equivalent. If not identical → bug detected.
+	FixMDeMorganOr = "FixMDeMorganOr"
+
+	// BETWEEN → Comparison: x BETWEEN a AND b → (x >= a) AND (x <= b)
+	// Semantically equivalent. If not identical → bug detected.
+	FixMBetweenToCmp = "FixMBetweenToCmp"
+
+	// BETWEEN → Drop Upper Bound: x BETWEEN a AND b → x >= a
+	// Implication (upper): satisfying both bounds ⊆ satisfying lower bound. If containment violated → bug detected.
+	FixMBetweenDropUpperU = "FixMBetweenDropUpperU"
+
+	// BETWEEN → Drop Lower Bound: x BETWEEN a AND b → x <= b
+	// Implication (upper): satisfying both bounds ⊆ satisfying upper bound. If containment violated → bug detected.
+	FixMBetweenDropLowerU = "FixMBetweenDropLowerU"
+
+	// NULL-safe Equality → Normal Equality: a <=> b → a = b
+	// Implication (lower): = result ⊆ <=> result (a=b TRUE ⊆ a<=>b TRUE). If containment violated → bug detected.
+	FixMNullEqToLowerL = "FixMNullEqToLowerL"
+
+	// ALL → ANY/SOME: x > ALL(subq) → x > ANY(subq)
+	// Implication (upper): ALL result ⊆ ANY result (satisfying ALL values ⊆ satisfying SOME value)
+	// Warning: NULL boundary may break containment (empty subquery: ALL→TRUE, ANY→FALSE). Accept false positive risk.
+	FixMAllToAnyU = "FixMAllToAnyU"
+
+	// ANY → ALL: x > ANY(subq) → x > ALL(subq)
+	// Implication (lower): ANY result ⊇ ALL result (satisfying SOME value ⊇ satisfying ALL values)
+	// Warning: NULL boundary may break containment. Accept false positive risk.
+	FixMAnyToAllL = "FixMAnyToAllL"
+
+	// COALESCE → CASE: COALESCE(a, b) → CASE WHEN a IS NOT NULL THEN a ELSE b END
+	// Semantically equivalent. If not identical → bug detected.
+	FixMCoalesceToCase = "FixMCoalesceToCase"
+
+	// NULLIF → CASE: NULLIF(a, b) → CASE WHEN a = b THEN NULL ELSE a END
+	// Semantically equivalent. If not identical → bug detected.
+	FixMNullifToCase = "FixMNullifToCase"
+
+	// EXISTS → IN: EXISTS(subquery) → lhs IN (subquery) with NULL-safe CASE wrapping
+	// Semantically equivalent (with NULL safety). If result sets differ → bug detected.
+	FixMExistsToIn = "FixMExistsToIn"
+
+	// IN → EXISTS: lhs IN (subquery) → EXISTS(subquery WHERE lhs = col AND pred)
+	// Semantically equivalent (with NULL safety). If result sets differ → bug detected.
+	FixMInToExists = "FixMInToExists"
+
+	// GaussDB-M specific EET mutations (equivalence class)
+	// These exploit behavioral differences between GaussDB-M and standard MySQL
+
+	// IF → CASE: IF(cond, a, b) → CASE WHEN cond THEN a ELSE b END
+	// Semantically equivalent in M mode. If result sets differ → bug detected.
+	FixMIfToCase = "FixMIfToCase"
+
+	// CONCAT → Pipe: CONCAT(a, b) → a || b
+	// Semantically equivalent in M mode (may differ in NULL handling). If result sets differ → bug detected.
+	FixMConcatToPipe = "FixMConcatToPipe"
 )
 
 // 1. --------------------------------------------------

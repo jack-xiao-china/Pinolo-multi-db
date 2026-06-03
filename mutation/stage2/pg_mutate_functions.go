@@ -608,7 +608,8 @@ func mutateCmpOpUpperInFrom(rootNode *pgquery.ParseResult, fromNode *pgquery.Nod
 	return "", false
 }
 
-// doFixMCmpOpL_Pg: >=|<=|!=|<> -> >|<|<
+// doFixMCmpOpL_Pg: >=|<= -> >|<
+// NOTE: != and <> are NOT included because != -> < has no valid containment relationship.
 func doFixMCmpOpL_Pg(rootNode *pgquery.ParseResult, node *pgquery.Node) (string, error) {
 	if rootNode == nil || len(rootNode.Stmts) == 0 {
 		return "", errors.New("[doFixMCmpOpL_Pg]rootNode == nil || len(rootNode.Stmts) == 0")
@@ -677,26 +678,6 @@ func mutateCmpOpLowerInExpr(rootNode *pgquery.ParseResult, exprNode *pgquery.Nod
 			}
 		case "<=":
 			// <= -> <
-			newName := []*pgquery.Node{pgquery.MakeStrNode("<")}
-			oldName := aExpr.Name
-			aExpr.Name = newName
-			sql, err := pgquery.Deparse(rootNode)
-			aExpr.Name = oldName
-			if err == nil {
-				return sql, true
-			}
-		case "!=":
-			// != -> <
-			newName := []*pgquery.Node{pgquery.MakeStrNode("<")}
-			oldName := aExpr.Name
-			aExpr.Name = newName
-			sql, err := pgquery.Deparse(rootNode)
-			aExpr.Name = oldName
-			if err == nil {
-				return sql, true
-			}
-		case "<>":
-			// <> -> <
 			newName := []*pgquery.Node{pgquery.MakeStrNode("<")}
 			oldName := aExpr.Name
 			aExpr.Name = newName

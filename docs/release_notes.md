@@ -1,3 +1,53 @@
+## v0.3.0 | 2026-06-02
+- 修复：移除 FixMCmpOpL 对 `!=`/`<>` 的无效蕴含变异（MySQL + PG），`!=→<` 无包含关系
+- 修复：将 tautology/contradiction/CASE wrapping 变异（FixMAndTrueU/FixMOrFalseL/FixMCaseTrueU/FixMCaseFalseL）修正为等价分类，使用 `CheckEquivalence()` 而非 `Check()`
+- 修复：GaussDB-A task runner 根据 `IsEquivalence` 选择 equivalence oracle（之前只用 `Check()`）
+- 修复：MySQL task runner 根据 `IsEquivalence` 选择 equivalence oracle
+- 修复：移除 `addFixMExistsToIn` 的 `!in.Not` 限制，NOT EXISTS 也支持等价变换
+- 新增：2 条 BETWEEN 蕴含变异（MySQL）：
+  - `FixMBetweenDropUpperU`：x BETWEEN a AND b → x >= a（满足上下界 ⊆ 满足下界）
+  - `FixMBetweenDropLowerU`：x BETWEEN a AND b → x <= b（满足上下界 ⊆ 满足上界）
+- 新增：1 条 NullEq 蕴含变异（MySQL）：
+  - `FixMNullEqToLowerL`：a <=> b → a = b（= 的 TRUE 集合 ⊆ <=> 的 TRUE 集合）
+- 新增：2 条 ALL/ANY 跨量词蕴含变异（MySQL）：
+  - `FixMAllToAnyU`：x > ALL(subq) → x > ANY(subq)（满足所有值 ⊆ 满足某个值）
+  - `FixMAnyToAllL`：x > ANY(subq) → x > ALL(subq)（满足某个值 ⊇ 满足所有值）
+- 新增：`exprReplacer` 支持 `*ast.FuncCallExpr` 整体替换（遍历 Args slice）
+- 新增：随机 SQL 生成 SELF JOIN 支持（`EnableSelfJoin` 配置，d6≤2 时添加自连接）
+- 新增：随机 SQL 生成 ENUM 类型支持（`parseEnumValues`、`PickEnumValue`、typeMatch 扩展）
+- 新增：3 组 PG 版本蕴含变异补齐：
+  - `FixMBetweenDropUpperU_Pg`/`FixMBetweenDropLowerU_Pg`：PG BETWEEN 放松上界/下界
+  - `FixMAllToAnyU_Pg`/`FixMAnyToAllL_Pg`：PG ALL↔ANY 跨量词
+  - `FixMIsNotDistinctFromToLowerL_Pg`：PG IS NOT DISTINCT FROM → =（`AEXPR_NOT_DISTINCT` Kind）
+
+## v0.2.9 | 2026-06-01
+- 修复：`RunTaskGaussDB()` 调用标准 MySQL stage1/stage2 函数改为 M-mode 专用函数（`InitAndExecForMMode`/`MutateAllAndExecForMMode`），使 `FixMIfToCase`/`FixMConcatToPipe` 变异可达
+- 修复：`RunTaskGaussDB()` 新增 Stage1 Skipped 处理逻辑（M-mode 不支持的语法跳过）
+- 新增：`MutateUnit`/`PgMutateUnit` `IsEquivalence` 字段，区分 implication oracle 与 equivalence oracle
+- 新增：`isEquivalenceMutation()`/`isEquivalenceMutationPg()` helper 函数
+- 新增：task runner 根据 `IsEquivalence` 选择 `oracle.Check()` 或 `oracle.CheckEquivalence()`
+- 新增：GaussDB-M EET 集成测试（`gaussdb_m_eet_mutations_test.go`）
+
+## v0.2.8 | 2026-06-01
+- 新增：5 条 EET 语义重写规则移植到 MySQL mutation 引擎：
+  - `FixMDeMorganAnd`：(A AND B) → NOT(NOT(A) OR NOT(B))（De Morgan 定律 AND→OR）
+  - `FixMDeMorganOr`：(A OR B) → NOT(NOT(A) AND NOT(B))（De Morgan 定律 OR→AND）
+  - `FixMBetweenToCmp`：x BETWEEN a AND b → (x >= a) AND (x <= b)
+  - `FixMCoalesceToCase`：COALESCE(a, b) → CASE WHEN a IS NOT NULL THEN a ELSE b END
+  - `FixMNullifToCase`：NULLIF(a, b) → CASE WHEN a = b THEN NULL ELSE a END
+- 新增：5 条 EET 语义重写规则移植到 PostgreSQL mutation 引擎：
+  - `FixMDeMorganAnd_Pg`、`FixMDeMorganOr_Pg`、`FixMBetweenToCmp_Pg`、`FixMCoalesceToCase_Pg`、`FixMNullifToCase_Pg`
+- 新增：Oracle 等价判断函数 `CheckEquivalence`（`mutation/oracle/oracle.go`）
+- 新增：MySQL 版文件 `eet_demorgan.go`、`eet_between.go`、`eet_functions.go`
+- 新增：PG 版文件 `pg_eet_demorgan.go`、`pg_eet_between.go`、`pg_eet_functions.go`、`pg_eet_subquery.go`
+- 新增：2 条 EET 子查询变换规则（MySQL + PG 双版本）：
+  - `FixMExistsToIn` / `FixMExistsToIn_Pg`：EXISTS(subquery) → NULL-safe IN 等价变换
+  - `FixMInToExists` / `FixMInToExists_Pg`：IN(subquery) → NULL-safe EXISTS 等价变换
+- 新增：`mutatevisitor.go` 中 BetweenExpr 和 FuncCallExpr 的 EET mining 支持
+- 新增：`pg_mutatevisitor.go` 中 BoolExpr De Morgan mining、AExpr BETWEEN mining、FuncCall/CaseExpr mining 支持
+- 新增：`exprReplacer` AST 替换辅助工具、`findFuncCallInWhere`/`findBetweenExprInWhere` PG AST 搜索辅助
+- 新增：设计文档 `docs/superpowers/specs/2026-06-01-eet-extension-gaussdb-m-design.md`
+
 ## v0.2.7 | 2026-06-01
 - 新增：EET 变换规则移植到 mutation 引擎，实现 5 种语义等价变换：
   - `FixMAndTrueU`：WHERE E → WHERE (p OR NOT p OR p IS NULL) AND E（永真式包裹）

@@ -329,7 +329,7 @@ func buildRandomBoolExpr(seed int64) ast.ExprNode {
 	return &test_driver.ValueExpr{Datum: test_driver.NewDatum(0)}
 }
 
-// getEETMutationNames: return all EET mutation names
+// getEETMutationNames: return all EET mutation names (including semantic rewrite rules)
 func getEETMutationNames() []string {
 	return []string{
 		FixMAndTrueU,
@@ -337,5 +337,12 @@ func getEETMutationNames() []string {
 		FixMCaseTrueU,
 		FixMCaseFalseL,
 		FixMCaseRandEq,
+		FixMDeMorganAnd,
+		FixMDeMorganOr,
+		FixMBetweenToCmp,
+		FixMCoalesceToCase,
+		FixMNullifToCase,
+			FixMExistsToIn,
+			FixMInToExists,
 	}
 }

@@ -7,15 +7,15 @@ import (
 // FROM clause and JOIN generation
 // Inspired by EET's from_clause/table_ref/joined_table productions and SQLancer's MySQLJoin
 
-// generateFromClause: generate a FROM clause with optional JOINs
+// generateFromClause: generate a FROM clause with optional JOINs and self-joins
 // Returns (fromSQL, populated scope with available columns)
 func (g *QueryGenerator) generateFromClause(scope *Scope) (string, *Scope) {
 	if len(scope.Schema.Tables) == 0 {
 		return "", scope
 	}
 
-	// Pick 1-3 random tables for the FROM clause
-	numTables := g.randInt(1, min(3, len(scope.Schema.Tables)))
+	// Pick 1-2 random tables for the FROM clause (reduced from 1-3 to leave room for self-join)
+	numTables := g.randInt(1, min(2, len(scope.Schema.Tables)))
 	selectedTables := pickRandomN(g.Rand, scope.Schema.Tables, numTables)
 
 	// Create new scope with selected tables
@@ -48,6 +48,18 @@ func (g *QueryGenerator) generateFromClause(scope *Scope) (string, *Scope) {
 			newScope.AddTable(table.Name, alias)
 			fromParts = append(fromParts, fmt.Sprintf("%s AS %s", table.Name, alias))
 		}
+	}
+
+	// Self-join: add one of the existing tables again with a different alias
+	// This triggers optimizer paths where FixMOn1U/0L can detect bugs
+	if g.Config.EnableJoin && g.Config.EnableSelfJoin && len(newScope.Tables) > 0 && g.d6() <= 2 {
+		selfJoinRef := pickRandom(g.Rand, newScope.Tables)
+		selfAlias := g.nextTableAlias()
+		newScope.AddTable(selfJoinRef.TableName, selfAlias)
+
+		onClause := g.generateJoinOnClause(newScope)
+		fromParts = append(fromParts, fmt.Sprintf("INNER JOIN %s AS %s ON %s",
+			selfJoinRef.TableName, selfAlias, onClause))
 	}
 
 	return joinStrings(fromParts, " "), newScope

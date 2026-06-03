@@ -167,10 +167,18 @@ func RunTaskGaussDBA(config *TaskConfig, publicLogger *logrus.Logger) (*TaskResu
 			mutatedSql := mutateUnit.Sql
 			mutatedResult := mutateUnit.ExecResult
 
-			// 2.3 Use oracle.Check to detect logical bugs
-			check, err := oracle.Check(originalResult, mutatedResult, isUpper)
-			if err != nil {
-				return nil, err
+			// 2.3 Use appropriate oracle based on IsEquivalence
+			// Equivalence mutations (DeMorgan, BETWEEN→cmp, COALESCE→CASE, etc.) use CheckEquivalence
+			// Implication mutations (FixMWhere1U, FixMCmpOpU, etc.) use Check with containment logic
+			var check bool
+			var oracleErr error
+			if mutateUnit.IsEquivalence {
+				check, oracleErr = oracle.CheckEquivalence(originalResult, mutatedResult)
+			} else {
+				check, oracleErr = oracle.Check(originalResult, mutatedResult, isUpper)
+			}
+			if oracleErr != nil {
+				return nil, oracleErr
 			}
 			if !check {
 				// Logical bug detected!

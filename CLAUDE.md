@@ -60,24 +60,56 @@ The main executable supports these subcommands:
    - Applies mutations like: `WHERE x → WHERE 1`, `HAVING x → HAVING 1`, `DISTINCT → non-DISTINCT`, comparison operators modifications
    - Mutation naming: `FixM` (fixed mutation), `RdM` (random mutation), suffix `U` (upper/expanding), `L` (lower/shrinking)
 
-4. **mutation/oracle** (`oracle.go`) - Implication Oracle that compares original vs mutated SQL results. A bug is detected when result containment relationship is violated.
+4. **mutation/oracle** (`oracle.go`) - Implication Oracle that compares original vs mutated SQL results. A bug is detected when result containment relationship is violated. Also provides `CheckEquivalence()` for EET semantic rewrite mutations.
 
 5. **task** (`task.go`, `taskpool.go`) - Orchestrates testing workflow:
    - Loads config, connects to DBMS, runs mutations, reports bugs
    - TaskPool runs multiple tasks in parallel with thread control
+   - Selects `oracle.Check()` for implication mutations and `oracle.CheckEquivalence()` for equivalence mutations based on `IsEquivalence` field
+
+6. **generator** (`generator/`) - Random SQL generation engine for EET-style testing:
+   - Schema discovery from live database via `connector.SchemaInfo`
+   - Scope-aware expression generation with type constraints
+   - Supports MySQL, PostgreSQL, GaussDB-A/M dialects
+   - Configurable features: JOINs, self-joins, subqueries, CTEs, ENUM constants
 
 ### Mutation Types
 
-See `mutation/stage2/allmutations.go` for all mutation names:
+See `mutation/stage2/allmutations.go` for all mutation names. Mutations are categorized as:
+
+**Implication mutations** (use `oracle.Check()` with containment logic):
 - `FixMDistinctU/L` - DISTINCT modifications
 - `FixMUnionAllU/L` - UNION to UNION ALL changes
-- `FixMCmpOpU/L` - Comparison operator changes (>, <, = to >=, <=)
+- `FixMCmpOpU/L` - Comparison operator changes (>, <, = → >=, <=; **excluding !=**)
 - `FixMInNullU` - Add NULL to IN lists
 - `FixMWhere1U/0L` - WHERE clause modifications
 - `FixMHaving1U/0L` - HAVING clause modifications
 - `FixMOn1U/0L` - JOIN ON clause modifications
 - `RdMLikeU/L` - LIKE pattern modifications
 - `RdMRegExpU/L` - REGEXP pattern modifications
+- `FixMBetweenDropUpperU` - x BETWEEN a AND b → x >= a (upper: drop upper bound)
+- `FixMBetweenDropLowerU` - x BETWEEN a AND b → x <= b (upper: drop lower bound)
+- `FixMNullEqToLowerL` - a <=> b → a = b (lower: null-safe eq → normal eq)
+- `FixMAllToAnyU` - ALL(subq) → ANY(subq) (upper: ALL ⊆ ANY)
+- `FixMAnyToAllL` - ANY(subq) → ALL(subq) (lower: ANY ⊇ ALL)
+
+**Equivalence mutations** (use `oracle.CheckEquivalence()` for exact equality):
+- `FixMAndTrueU` - E → (p OR NOT p OR p IS NULL) AND E (tautology wrapping)
+- `FixMOrFalseL` - E → (p AND NOT p AND p IS NOT NULL) OR E (contradiction wrapping)
+- `FixMCaseTrueU` - E → CASE WHEN TRUE THEN E ELSE rand END
+- `FixMCaseFalseL` - E → CASE WHEN FALSE THEN rand ELSE E END
+- `FixMCaseRandEq` - E → CASE WHEN rand THEN E ELSE E END (random branch)
+- `FixMDeMorganAnd` - (A AND B) → NOT(NOT(A) OR NOT(B)) (De Morgan AND)
+- `FixMDeMorganOr` - (A OR B) → NOT(NOT(A) AND NOT(B)) (De Morgan OR)
+- `FixMBetweenToCmp` - x BETWEEN a AND b → (x >= a) AND (x <= b)
+- `FixMCoalesceToCase` - COALESCE(a, b) → CASE WHEN a IS NOT NULL THEN a ELSE b END
+- `FixMNullifToCase` - NULLIF(a, b) → CASE WHEN a = b THEN NULL ELSE a END
+- `FixMExistsToIn` - EXISTS(subq) → NULL-safe IN equivalent
+- `FixMInToExists` - IN(subq) → NULL-safe EXISTS equivalent
+- `FixMIfToCase` - IF(cond, a, b) → CASE WHEN cond THEN a ELSE b END (GaussDB-M)
+- `FixMConcatToPipe` - CONCAT(a, b) → a || b (GaussDB-M)
+
+**PG mutations** follow the same categories with `_Pg` suffix, plus `FixMIsNotDistinctFromToLowerL_Pg` (IS NOT DISTINCT FROM → =).
 
 ### Test Configuration
 

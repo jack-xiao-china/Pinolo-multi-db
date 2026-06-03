@@ -69,6 +69,56 @@ const (
 
 	// Rule 5: E → CASE WHEN rand THEN E ELSE E END
 	FixMCaseRandEq_Pg = "FixMCaseRandEq_Pg"
+
+		// EET semantic rewrite mutations for PostgreSQL (equivalence class)
+
+		// De Morgan AND: (A AND B) -> NOT(NOT(A) OR NOT(B))
+		// Semantically equivalent. If result sets differ -> bug detected.
+		FixMDeMorganAnd_Pg = "FixMDeMorganAnd_Pg"
+
+		// De Morgan OR: (A OR B) -> NOT(NOT(A) AND NOT(B))
+		// Semantically equivalent. If result sets differ -> bug detected.
+		FixMDeMorganOr_Pg = "FixMDeMorganOr_Pg"
+
+		// BETWEEN -> Comparison: x BETWEEN a AND b -> (x >= a) AND (x <= b)
+		// Semantically equivalent. If result sets differ -> bug detected.
+		FixMBetweenToCmp_Pg = "FixMBetweenToCmp_Pg"
+
+		// BETWEEN -> Drop Upper Bound: x BETWEEN a AND b -> x >= a
+		// Implication (upper): satisfying both bounds ⊆ satisfying lower bound. If containment violated -> bug detected.
+		FixMBetweenDropUpperU_Pg = "FixMBetweenDropUpperU_Pg"
+
+		// BETWEEN -> Drop Lower Bound: x BETWEEN a AND b -> x <= b
+		// Implication (upper): satisfying both bounds ⊆ satisfying upper bound. If containment violated -> bug detected.
+		FixMBetweenDropLowerU_Pg = "FixMBetweenDropLowerU_Pg"
+
+		// COALESCE -> CASE: COALESCE(a, b) -> CASE WHEN a IS NOT NULL THEN a ELSE b END
+		// Semantically equivalent. If result sets differ -> bug detected.
+		FixMCoalesceToCase_Pg = "FixMCoalesceToCase_Pg"
+
+		// NULLIF -> CASE: NULLIF(a, b) -> CASE WHEN a = b THEN NULL ELSE a END
+		// Semantically equivalent. If result sets differ -> bug detected.
+		FixMNullifToCase_Pg = "FixMNullifToCase_Pg"
+
+		// EXISTS -> IN: EXISTS(subquery) -> lhs IN (subquery) with NULL-safe CASE wrapping
+		// Semantically equivalent (with NULL safety). If result sets differ -> bug detected.
+		FixMExistsToIn_Pg = "FixMExistsToIn_Pg"
+
+		// IN -> EXISTS: lhs IN (subquery) -> EXISTS(subquery WHERE lhs = col AND pred)
+		// Semantically equivalent (with NULL safety). If result sets differ -> bug detected.
+		FixMInToExists_Pg = "FixMInToExists_Pg"
+		// ALL -> ANY/SOME: x > ALL(subq) -> x > ANY(subq)
+		// Implication (upper): ALL result ⊆ ANY result (satisfying ALL values ⊆ satisfying SOME value)
+		// Warning: NULL boundary may break containment. Accept false positive risk.
+		FixMAllToAnyU_Pg = "FixMAllToAnyU_Pg"
+
+		// ANY -> ALL: x > ANY(subq) -> x > ALL(subq)
+		// Implication (lower): ANY result ⊇ ALL result (satisfying SOME value ⊇ satisfying ALL values)
+		// Warning: NULL boundary may break containment. Accept false positive risk.
+		FixMAnyToAllL_Pg = "FixMAnyToAllL_Pg"
+n		// IS NOT DISTINCT FROM -> =: a IS NOT DISTINCT FROM b -> a = b
+		// Implication (lower): = result ⊆ IS NOT DISTINCT FROM result (a=b TRUE ⊆ a IS NOT DISTINCT FROM b TRUE)
+		FixMIsNotDistinctFromToLowerL_Pg = "FixMIsNotDistinctFromToLowerL_Pg"
 )
 
 // PgCandidate: mutation candidate for PostgreSQL AST
@@ -120,6 +170,10 @@ func (v *PgMutateVisitor) visitNode(node *pgquery.Node, flag int) {
 		// Handle parenthesized expressions if present
 	case *pgquery.Node_SubLink:
 		v.visitSubLink(node.GetSubLink(), flag)
+		case *pgquery.Node_FuncCall:
+			v.miningFuncCall(node, flag)
+		case *pgquery.Node_CaseExpr:
+			v.visitCaseExpr(node.GetCaseExpr(), flag)
 	default:
 		// For other node types, recursively visit child nodes
 		v.visitChildren(node, flag)
@@ -257,6 +311,13 @@ func (v *PgMutateVisitor) visitAExpr(expr *pgquery.A_Expr, flag int) {
 			v.miningRegExpExpr(expr, flag^1)
 		}
 	}
+		// EET BETWEEN -> Comparison transformation
+		v.addFixMBetweenToCmp_Pg(expr, flag)
+	// BETWEEN -> Drop bound transformations (implication upper)
+		v.addFixMBetweenDropUpperU_Pg(expr, flag)
+		v.addFixMBetweenDropLowerU_Pg(expr, flag)
+	// IS NOT DISTINCT FROM -> = (implication lower)
+		v.addFixMIsNotDistinctFromToLowerL_Pg(expr, flag)
 }
 
 // visitBoolExpr: visit a boolean expression (AND/OR/NOT)
@@ -271,11 +332,15 @@ func (v *PgMutateVisitor) visitBoolExpr(expr *pgquery.BoolExpr, flag int) {
 		for _, arg := range expr.Args {
 			v.visitNode(arg, flag)
 		}
+		// EET De Morgan: (A AND B) -> NOT(NOT(A) OR NOT(B))
+		v.addFixMDeMorganAnd_Pg(expr, flag)
 	case pgquery.BoolExprType_OR_EXPR:
 		// OR: visit all arguments with same flag
 		for _, arg := range expr.Args {
 			v.visitNode(arg, flag)
 		}
+		// EET De Morgan: (A OR B) -> NOT(NOT(A) AND NOT(B))
+		v.addFixMDeMorganOr_Pg(expr, flag)
 	case pgquery.BoolExprType_NOT_EXPR:
 		// NOT: invert flag and visit the single argument
 		if len(expr.Args) > 0 {
@@ -299,6 +364,13 @@ func (v *PgMutateVisitor) visitSubLink(sublink *pgquery.SubLink, flag int) {
 	if sublink.Testexpr != nil {
 		v.visitNode(sublink.Testexpr, flag)
 	}
+
+		// EET EXISTS <-> IN transformation mining
+		v.addFixMExistsToIn_Pg(sublink, flag)
+		v.addFixMInToExists_Pg(sublink, flag)
+	// ALL <-> ANY cross-quantifier transformation mining
+		v.addFixMAllToAnyU_Pg(sublink, flag)
+		v.addFixMAnyToAllL_Pg(sublink, flag)
 }
 
 // visitWithClause: visit a WITH clause (CTEs)
@@ -342,6 +414,39 @@ func (v *PgMutateVisitor) visitChildren(node *pgquery.Node, flag int) {
 }
 
 // Mining functions - add candidates for various mutation types
+
+// miningFuncCall: add mutation candidates for function calls (COALESCE, NULLIF)
+func (v *PgMutateVisitor) miningFuncCall(node *pgquery.Node, flag int) {
+	if node == nil {
+		return
+	}
+	// EET COALESCE -> CASE transformation
+	v.addFixMCoalesceToCase_Pg(node, flag)
+	// EET NULLIF -> CASE transformation
+	v.addFixMNullifToCase_Pg(node, flag)
+}
+
+// visitCaseExpr: visit a CASE expression and find candidates in sub-expressions
+func (v *PgMutateVisitor) visitCaseExpr(caseExpr *pgquery.CaseExpr, flag int) {
+	if caseExpr == nil {
+		return
+	}
+	// Visit WHEN clauses
+	for _, arg := range caseExpr.Args {
+		whenClause := arg.GetCaseWhen()
+		if whenClause != nil {
+			v.visitNode(whenClause.Expr, flag)
+			v.visitNode(whenClause.Result, flag)
+		}
+	}
+	// Visit ELSE clause
+	if caseExpr.Defresult != nil {
+		v.visitNode(caseExpr.Defresult, flag)
+	}
+	if caseExpr.Arg != nil {
+		v.visitNode(caseExpr.Arg, flag)
+	}
+}
 
 // miningSelectStmt: add mutation candidates for SELECT statement
 func (v *PgMutateVisitor) miningSelectStmt(sel *pgquery.SelectStmt, flag int) {
@@ -434,15 +539,12 @@ func (v *PgMutateVisitor) miningCmpOp(expr *pgquery.A_Expr, flag int) {
 		v.addPgCandidate(FixMCmpOpU_Pg, 1, nil, flag)
 	}
 
-	// Lower mutations: >= -> >, <= -> <, != -> <
+	// Lower mutations: >= -> >, <= -> <
+	// NOTE: != and <> are NOT included because != -> < has no valid containment relationship.
 	switch opName {
 	case ">=":
 		v.addPgCandidate(FixMCmpOpL_Pg, 0, nil, flag)
 	case "<=":
-		v.addPgCandidate(FixMCmpOpL_Pg, 0, nil, flag)
-	case "<>":
-		v.addPgCandidate(FixMCmpOpL_Pg, 0, nil, flag)
-	case "!=":
 		v.addPgCandidate(FixMCmpOpL_Pg, 0, nil, flag)
 	}
 }
