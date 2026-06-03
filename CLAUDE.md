@@ -151,6 +151,40 @@ Tests require a MySQL-compatible database running. The `testsqls` package uses h
 
 Users must provide their own DBMS test environment. The tool itself does not depend on Docker.
 
+## TPC Benchmark Test Suites
+
+The project includes complete TPC-H and TPC-DS benchmark test suites for logical bug detection:
+
+### TPC-H (Decision Support Benchmark)
+- **Schema**: `resources/tpch_ddl.sql` - 8 tables (nation, region, part, supplier, partsupp, customer, orders, lineitem)
+- **Queries**: `resources/tpch_dml.sql` - 22 standard analytical queries
+- **Task Configs**:
+  - `tpch_task.json` - MySQL (port 3306, database: tpch)
+  - `tpch_pg_task.json` - PostgreSQL (port 5432, database: tpch)
+  - `tpch_gaussdb_m_task.json` - GaussDB-M (MySQL compatibility mode)
+  - `tpch_gaussdb_a_task.json` - GaussDB-A (Oracle compatibility mode)
+
+### TPC-DS (Decision Support Benchmark - Advanced)
+- **Schema**: `resources/tpcds_ddl.sql` - 25 tables (7 fact tables + 18 dimension tables)
+- **Queries**: `resources/tpcds_dml.sql` - 20 representative queries (simplified from full 99-query suite)
+- **Task Configs**:
+  - `tpcds_task.json` - MySQL (port 3306, database: tpcds)
+  - `tpcds_pg_task.json` - PostgreSQL (port 5432, database: tpcds)
+
+### Usage Example
+```bash
+# Run TPC-H on MySQL
+./impomysql task resources/tpch_task.json
+
+# Run TPC-DS on PostgreSQL
+./impomysql task resources/tpcds_pg_task.json
+
+# Run TPC-H on GaussDB-M
+./impomysql task resources/tpch_gaussdb_m_task.json
+```
+
+**Note**: These benchmarks require pre-populated test data. Use TPC-H/TPC-DS data generators (e.g., `dbgen` for TPC-H, `dsdgen` for TPC-DS) to load data before running tests.
+
 ## Important Notes
 
 - Only SELECT statements are supported for mutation testing
