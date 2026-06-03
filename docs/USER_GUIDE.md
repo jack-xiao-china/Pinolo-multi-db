@@ -404,9 +404,77 @@ output/postgresql/task-1/
 - 上变异 (`isUpper=true`)：`originalResult.Rows` 应是 `mutatedResult.Rows` 的子集，违反则为 Bug
 - 下变异 (`isUpper=false`)：`mutatedResult.Rows` 应是 `originalResult.Rows` 的子集，违反则为 Bug
 
-## 8 变异策略说明
+## 8 测试模式说明
 
-### 8.1 Stage1 预处理（过滤不支持特性）
+Pinolo 支持两种测试模式，适用于不同场景：
+
+### 8.1 基于给定查询的测试（推荐）
+
+**核心方法**：使用用户提供的 SQL 查询文件进行测试。
+
+**适用场景**：
+- 测试特定查询的逻辑正确性
+- 回归测试（验证已知查询在数据库更新后仍正确）
+- 生产环境查询验证
+
+**配置方式**：
+```json
+{
+  "dbms": "mysql",
+  "ddlPath": "./resources/ddl.sql",
+  "dmlPath": "./resources/dml.sql"
+}
+```
+
+**优势**：
+- 符合 Pinolo 论文的核心设计理念（Approximate Query Synthesis）
+- 测试结果可重复
+- 针对性强，可聚焦关键查询
+
+### 8.2 随机 SQL 生成模式
+
+**核心方法**：基于数据库 schema 自动生成随机查询进行测试。
+
+**适用场景**：
+- 探索性测试（发现未知问题）
+- 大规模压力测试
+- 数据库功能覆盖测试
+
+**配置方式**：
+```json
+{
+  "dbms": "mysql",
+  "genMode": "eet_style",
+  "genQueries": 100
+}
+```
+
+**注意**：
+- 生成的查询可能不符合业务逻辑
+- 测试结果不可重复（除非固定 seed）
+- 可能产生较多假阳性
+
+详见 [§9 Random SQL 生成模式](#9-random-sql-生成模式)。
+
+### 8.3 两种模式的对比
+
+| 维度 | 基于给定查询 | 随机生成 |
+|------|-------------|---------|
+| **设计理念** | 论文核心方法（AQS） | 扩展方法 |
+| **可重复性** | 高 | 低（除非固定 seed） |
+| **针对性** | 强 | 弱 |
+| **覆盖率** | 依赖查询文件 | 较高 |
+| **假阳性率** | 较低 | 较高 |
+| **适用场景** | 回归测试、生产验证 | 探索性测试、压力测试 |
+
+**建议**：
+- 生产环境验证：使用基于给定查询模式
+- 探索性测试：使用随机生成模式
+- 结合使用：先用随机生成发现问题，再用给定查询验证
+
+## 9 变异策略说明
+
+### 9.1 Stage1 预处理（过滤不支持特性）
 
 **MySQL/GaussDB M 通用预处理**：
 
@@ -437,35 +505,50 @@ output/postgresql/task-1/
 | ROWNUM | 保留原样 |
 | `(+)` 外连接 | 转 LEFT JOIN |
 
-### 8.2 Stage2 变异类型
+### 9.2 Stage2 变异类型
 
-**MySQL/GaussDB M 变异**：
+**重要说明**：v0.4.0 已移除所有 EET 等价变换，当前所有变异都是 **Implication 变异**（近似变换）。
 
-| 名称 | 变异 | 方向 |
-|------|------|------|
-| FixMWhere1U / FixMWhere0L | WHERE → 1 / 0 | 上/下 |
-| FixMHaving1U / FixMHaving0L | HAVING → 1 / 0 | 上/下 |
-| FixMOn1U / FixMOn0L | ON → 1 / 0 | 上/下 |
-| FixMDistinctU / FixMDistinctL | 删除/添加 DISTINCT | 上/下 |
-| FixMUnionAllU / FixMUnionAllL | UNION → UNION ALL / 反向 | 上/下 |
-| FixMCmpOpU / FixMCmpOpL | >→>=,<→<=,=→>= / >=→>,<=→< | 上/下 |
-| FixMInNullU | IN 列表添加 NULL | 上 |
-| RdMLikeU / RdMLikeL | LIKE 模式扩展/收缩 | 上/下 |
-| RdMRegExpU / RdMRegExpL | 正则模式扩展/收缩 | 上/下 |
+**MySQL/GaussDB M 变异（11 个）**：
 
-**PostgreSQL 变异（16 种）**：
+| 名称 | 变异 | 方向 | 健全性 |
+|------|------|------|--------|
+| FixMWhere1U / FixMWhere0L | WHERE → TRUE / FALSE | 上/下 | ✅ |
+| FixMHaving1U / FixMHaving0L | HAVING → TRUE / FALSE | 上/下 | ✅ |
+| FixMOn1U / FixMOn0L | ON → TRUE / FALSE | 上/下 | ✅ |
+| FixMCmpOpU / FixMCmpOpL | 比较运算符扩展/收缩 | 上/下 | ✅ |
+| FixMInNullU | IN 列表添加 NULL | 上 | ✅ |
+| FixMBetweenDropUpperU | BETWEEN 移除上界 | 上 | ✅ |
+| FixMBetweenDropLowerU | BETWEEN 移除下界 | 上 | ✅ |
+| FixMNullEqToLowerL | <=> → = | 下 | ⚠️ NULL 处理差异 |
+| FixMAllToAnyU | ALL → ANY | 上 | ⚠️ 空子查询边界 |
+| FixMAnyToAllL | ANY → ALL | 下 | ⚠️ 空子查询边界 |
+| RdMLikeU / RdMLikeL | LIKE 模式扩展/收缩 | 上/下 | ✅ |
+| RdMRegExpU / RdMRegExpL | 正则模式扩展/收缩 | 上/下 | ✅ |
 
-| 名称 | 变异 | 方向 |
-|------|------|------|
-| FixMWhere1U_Pg / FixMWhere0L_Pg | WHERE → TRUE / FALSE | 上/下 |
-| FixMHaving1U_Pg / FixMHaving0L_Pg | HAVING → TRUE / FALSE | 上/下 |
-| FixMOn1U_Pg / FixMOn0L_Pg | ON → TRUE / FALSE | 上/下 |
-| FixMDistinctU_Pg / FixMDistinctL_Pg | 删除/添加 DISTINCT | 上/下 |
-| FixMUnionAllU_Pg / FixMUnionAllL_Pg | UNION → UNION ALL / 反向 | 上/下 |
-| FixMCmpOpU_Pg / FixMCmpOpL_Pg | 比较运算符变换 | 上/下 |
-| FixMInNullU_Pg | IN 列表添加 NULL | 上 |
-| RdMLikePgU / RdMLikePgL | LIKE 模式扩展/收缩 | 上/下 |
-| RdMRegExpPgU / RdMRegExpPgL | 正则 `~` 模式扩展/收缩 | 上/下 |
+**PostgreSQL 变异（15 个）**：
+
+| 名称 | 变异 | 方向 | 健全性 |
+|------|------|------|--------|
+| FixMWhere1U_Pg / FixMWhere0L_Pg | WHERE → TRUE / FALSE | 上/下 | ✅ |
+| FixMHaving1U_Pg / FixMHaving0L_Pg | HAVING → TRUE / FALSE | 上/下 | ✅ |
+| FixMOn1U_Pg / FixMOn0L_Pg | ON → TRUE / FALSE | 上/下 | ✅ |
+| FixMCmpOpU_Pg / FixMCmpOpL_Pg | 比较运算符变换 | 上/下 | ✅ |
+| FixMInNullU_Pg | IN 列表添加 NULL | 上 | ✅ |
+| FixMBetweenDropUpperU_Pg | BETWEEN 移除上界 | 上 | ✅ |
+| FixMBetweenDropLowerU_Pg | BETWEEN 移除下界 | 上 | ✅ |
+| FixMIsNotDistinctFromToLowerL_Pg | IS NOT DISTINCT FROM → = | 下 | ⚠️ NULL 处理差异 |
+| FixMAllToAnyU_Pg | ALL → ANY | 上 | ⚠️ 空子查询边界 |
+| FixMAnyToAllL_Pg | ANY → ALL | 下 | ⚠️ 空子查询边界 |
+| RdMLikePgU / RdMLikePgL | LIKE 模式扩展/收缩 | 上/下 | ✅ |
+| RdMRegExpPgU / RdMRegExpPgL | 正则 `~` 模式扩展/收缩 | 上/下 | ✅ |
+
+**⚠️ 标记说明**：
+- **FixMNullEqToLowerL**：`<=>` 和 `=` 对 NULL 的处理不同，可能产生假阳性
+- **FixMAllToAnyU/AnyToAllL**：空子查询时 ALL/ANY 语义不同，可能违反蕴含关系
+- 建议监控这些变异的假阳性率，如过高可考虑禁用
+
+详见 [ARCHITECTURE.md](ARCHITECTURE.md) 的变异健全性分析。
 
 ## 9 问题定位方法
 
@@ -629,23 +712,55 @@ Pinolo-main/
 
 ---
 
-*文档更新日期：2026-05-30*
-
-**EET 变异（5 种新增）**：
-
-| 名称 | 变异 | 方向 |
-|------|------|------|
-| FixMAndTrueU_Pg | WHERE E → WHERE (p OR NOT p OR p IS NULL) AND E | 上 |
-| FixMOrFalseL_Pg | WHERE E → WHERE (p AND NOT p AND p IS NOT NULL) OR E | 下 |
-| FixMCaseTrueU_Pg | WHERE E → CASE WHEN TRUE THEN E ELSE rand END | 上 |
-| FixMCaseFalseL_Pg | WHERE E → CASE WHEN FALSE THEN rand ELSE E END | 下 |
-| FixMCaseRandEq_Pg | WHERE E → CASE WHEN rand THEN E ELSE E END | 等价 |
+*文档更新日期：2026-06-03*
 
 
-## 9 Random SQL 生成模式
+## 10 Random SQL 生成模式
 
-Pinolo 支持随机 SQL 生成模式， 作为第三种运行模式（与 DDL/DML 文件模式和 go-randgen 模式并存）。 通过数据库 schema 发现自动生成测试 SQL，### 配置示例
+Pinolo 支持随机 SQL 生成模式，作为第三种运行模式（与 DDL/DML 文件模式和 go-randgen 模式并存）。通过数据库 schema 发现自动生成测试 SQL。
 
+**重要说明**：此模式是 Pinolo 的**扩展方法**，不是论文核心方法。论文核心的 Approximate Query Synthesis (AQS) 是基于给定查询进行近似合成。
+
+### 10.1 工作原理
+
+```
+数据库 Schema 发现
+    ↓
+随机查询生成器
+    - 基于 schema 生成随机 SELECT 查询
+    - 支持 JOIN、子查询、UNION、CTE 等
+    ↓
+生成的查询
+    ↓
+Stage1 + Stage2 + Oracle（与给定查询模式相同）
+```
+
+### 10.2 配置示例
+
+**MySQL 配置**：
+```json
+{
+  "outputPath": "./output",
+  "dbms": "mysql",
+  "taskId": 1,
+  "host": "localhost",
+  "port": 3306,
+  "username": "your_username",
+  "password": "your_password",
+  "dbname": "test_random",
+  "seed": 123456,
+  "genMode": "eet_style",
+  "genDepth": 3,
+  "genQueries": 100,
+  "genJoin": true,
+  "genSubquery": true,
+  "genUnion": true,
+  "genCTE": true,
+  "genGroupBy": true
+}
+```
+
+**PostgreSQL 配置**：
 ```json
 {
   "outputPath": "./output",
@@ -655,48 +770,96 @@ Pinolo 支持随机 SQL 生成模式， 作为第三种运行模式（与 DDL/DM
   "port": 5432,
   "username": "your_username",
   "password": "your_password",
-  "dbname": "test_eet",
+  "dbname": "test_random",
   "seed": 123456,
   "genMode": "eet_style",
   "genDepth": 3,
-  "genQueries": 100
+  "genQueries": 100,
   "genJoin": true,
-  "genSubquery": true
+  "genSubquery": true,
   "genUnion": true,
   "genCTE": true,
   "genGroupBy": true
 }
 ```
 
-### 字段说明
+### 10.3 字段说明
 
 | 字段 | 类型 | 必填 | 说明 |
 |------|------|------|------|
-| `outputPath` | string | 否 | 输出目录 |
-| `dbms` | string | 是 | 数据库类型 |
-| `taskId` | int | 是 | 任务 ID |
-| `host` | string | 是 | 数据库主机 |
-| `port` | int | 是 | 数据库端口 |
-| `username` | string | 是 | 用户名 |
-| `password` | string | 是 | 密码 |
-| `dbname` | string | 是 | 数据库名（需已存在且 |
-| `seed` | int64 | 否 | 生成种子，| `genMode` | string | 是 | 生成模式: `eet_style` |
-| `genDepth` | int | 否 | 表达式最大深度（默认 3) |
+| `genMode` | string | 是 | 生成模式，当前仅支持 `eet_style` |
+| `genDepth` | int | 否 | 表达式最大嵌套深度，默认 3 |
 | `genQueries` | int | 是 | 生成 SQL 数量 |
-| `genJoin` | bool | 否 | 是否生成 JOIN（默认 true) |
-| `genSubquery` | bool | 否 | 是否生成子查询(默认 true) |
-| `genUnion` | bool | 否 | 是否生成 UNION(默认 true) |
-| `genCTE` | bool | 否 | 是否生成 CTE/WITH(默认 true) |
-| `genGroupBy` | bool | 否 | 是否生成 GROUP BY(默认 true) |
+| `genJoin` | bool | 否 | 是否生成 JOIN，默认 true |
+| `genSubquery` | bool | 否 | 是否生成子查询，默认 true |
+| `genUnion` | bool | 否 | 是否生成 UNION，默认 true |
+| `genCTE` | bool | 否 | 是否生成 CTE/WITH，默认 true |
+| `genGroupBy` | bool | 否 | 是否生成 GROUP BY，默认 true |
 
-### 运行示例
+**注意**：不需要 `ddlPath` 和 `dmlPath`，查询由生成器自动生成。
+
+### 10.4 运行示例
+
+**Step 1：准备数据库**
+
+数据库必须预先创建且包含数据：
+
+```bash
+# MySQL
+mysql -u your_username -p -e "CREATE DATABASE test_random;"
+mysql -u your_username -p test_random < your_schema.sql
+
+# PostgreSQL
+psql -U your_username -c "CREATE DATABASE test_random;"
+psql -U your_username -d test_random < your_schema.sql
+```
+
+**Step 2：运行测试**
 
 ```bash
 # MySQL 生成模式测试
-./impomysql task ./resources/task_gen_config.json
+./impomysql task ./resources/task_random_gen.json
 
-# PostgreSQL 生成模式测试(需预先创建 test 数据库)
-PGPASSWORD='your_password' psql -h localhost -U your_username -d postgres -c "CREATE DATABASE test_eet;"
-./impomysql task ./resources/temp_test_pg.json
+# PostgreSQL 生成模式测试
+./impomysql task ./resources/task_random_gen_pg.json
 ```
+
+### 10.5 优缺点分析
+
+**优势**：
+- 无需手动准备测试查询
+- 可生成大量多样化查询
+- 适合探索性测试和压力测试
+
+**劣势**：
+- 生成的查询可能不符合业务逻辑
+- 测试结果不可重复（除非固定 seed）
+- 可能产生较多假阳性
+- 不是论文核心方法（AQS 基于给定查询）
+
+### 10.6 与给定查询模式的对比
+
+| 维度 | 给定查询模式 | 随机生成模式 |
+|------|-------------|-------------|
+| **设计理念** | 论文核心方法（AQS） | 扩展方法 |
+| **查询来源** | 用户提供 | 自动生成 |
+| **可重复性** | 高 | 低（除非固定 seed） |
+| **针对性** | 强 | 弱 |
+| **假阳性率** | 较低 | 较高 |
+| **适用场景** | 回归测试、生产验证 | 探索性测试、压力测试 |
+
+### 10.7 最佳实践
+
+1. **探索性测试**：使用随机生成模式发现潜在问题
+2. **问题验证**：对发现的问题，提取相关查询用给定查询模式验证
+3. **回归测试**：将验证过的查询加入回归测试集
+4. **固定 seed**：如需可重复结果，设置固定的 `seed` 值
+
+### 10.8 已知限制
+
+1. **数据生成与查询生成分离**：当前实现中，数据生成和查询生成是独立的，可能导致生成的查询无法充分利用数据特性
+2. **缺乏反馈机制**：生成器无法根据历史测试结果调整生成策略
+3. **Schema 发现限制**：仅支持基础 schema 信息，不支持复杂约束（如外键、检查约束）
+
+详见 [ARCHITECTURE.md](ARCHITECTURE.md) 的相关讨论。
 
