@@ -52,38 +52,6 @@ const (
 	// *pgquery.A_Expr (REGEXP/~): '*' -> '+'|'?'
 	RdMRegExpPgL = "RdMRegExpPgL"
 
-	// EET (Equivalent Expression Testing) transformation mutations for PostgreSQL
-	// Inspired by SQLancer's EET Oracle transformation rules
-
-	// Rule 1: E → (p OR NOT p OR p IS NULL) AND E (tautology wrapping)
-	FixMAndTrueU_Pg = "FixMAndTrueU_Pg"
-
-	// Rule 2: E → (p AND NOT p AND p IS NOT NULL) OR E (contradiction wrapping)
-	FixMOrFalseL_Pg = "FixMOrFalseL_Pg"
-
-	// Rule 3: E → CASE WHEN TRUE THEN E ELSE rand END
-	FixMCaseTrueU_Pg = "FixMCaseTrueU_Pg"
-
-	// Rule 4: E → CASE WHEN FALSE THEN rand ELSE E END
-	FixMCaseFalseL_Pg = "FixMCaseFalseL_Pg"
-
-	// Rule 5: E → CASE WHEN rand THEN E ELSE E END
-	FixMCaseRandEq_Pg = "FixMCaseRandEq_Pg"
-
-		// EET semantic rewrite mutations for PostgreSQL (equivalence class)
-
-		// De Morgan AND: (A AND B) -> NOT(NOT(A) OR NOT(B))
-		// Semantically equivalent. If result sets differ -> bug detected.
-		FixMDeMorganAnd_Pg = "FixMDeMorganAnd_Pg"
-
-		// De Morgan OR: (A OR B) -> NOT(NOT(A) AND NOT(B))
-		// Semantically equivalent. If result sets differ -> bug detected.
-		FixMDeMorganOr_Pg = "FixMDeMorganOr_Pg"
-
-		// BETWEEN -> Comparison: x BETWEEN a AND b -> (x >= a) AND (x <= b)
-		// Semantically equivalent. If result sets differ -> bug detected.
-		FixMBetweenToCmp_Pg = "FixMBetweenToCmp_Pg"
-
 		// BETWEEN -> Drop Upper Bound: x BETWEEN a AND b -> x >= a
 		// Implication (upper): satisfying both bounds ⊆ satisfying lower bound. If containment violated -> bug detected.
 		FixMBetweenDropUpperU_Pg = "FixMBetweenDropUpperU_Pg"
@@ -91,22 +59,6 @@ const (
 		// BETWEEN -> Drop Lower Bound: x BETWEEN a AND b -> x <= b
 		// Implication (upper): satisfying both bounds ⊆ satisfying upper bound. If containment violated -> bug detected.
 		FixMBetweenDropLowerU_Pg = "FixMBetweenDropLowerU_Pg"
-
-		// COALESCE -> CASE: COALESCE(a, b) -> CASE WHEN a IS NOT NULL THEN a ELSE b END
-		// Semantically equivalent. If result sets differ -> bug detected.
-		FixMCoalesceToCase_Pg = "FixMCoalesceToCase_Pg"
-
-		// NULLIF -> CASE: NULLIF(a, b) -> CASE WHEN a = b THEN NULL ELSE a END
-		// Semantically equivalent. If result sets differ -> bug detected.
-		FixMNullifToCase_Pg = "FixMNullifToCase_Pg"
-
-		// EXISTS -> IN: EXISTS(subquery) -> lhs IN (subquery) with NULL-safe CASE wrapping
-		// Semantically equivalent (with NULL safety). If result sets differ -> bug detected.
-		FixMExistsToIn_Pg = "FixMExistsToIn_Pg"
-
-		// IN -> EXISTS: lhs IN (subquery) -> EXISTS(subquery WHERE lhs = col AND pred)
-		// Semantically equivalent (with NULL safety). If result sets differ -> bug detected.
-		FixMInToExists_Pg = "FixMInToExists_Pg"
 		// ALL -> ANY/SOME: x > ALL(subq) -> x > ANY(subq)
 		// Implication (upper): ALL result ⊆ ANY result (satisfying ALL values ⊆ satisfying SOME value)
 		// Warning: NULL boundary may break containment. Accept false positive risk.
@@ -311,11 +263,9 @@ func (v *PgMutateVisitor) visitAExpr(expr *pgquery.A_Expr, flag int) {
 			v.miningRegExpExpr(expr, flag^1)
 		}
 	}
-		// EET BETWEEN -> Comparison transformation
-		v.addFixMBetweenToCmp_Pg(expr, flag)
-	// BETWEEN -> Drop bound transformations (implication upper)
-		v.addFixMBetweenDropUpperU_Pg(expr, flag)
-		v.addFixMBetweenDropLowerU_Pg(expr, flag)
+		// BETWEEN -> Drop bound transformations (implication upper)
+			v.addFixMBetweenDropUpperU_Pg(expr, flag)
+			v.addFixMBetweenDropLowerU_Pg(expr, flag)
 	// IS NOT DISTINCT FROM -> = (implication lower)
 		v.addFixMIsNotDistinctFromToLowerL_Pg(expr, flag)
 }
@@ -332,15 +282,11 @@ func (v *PgMutateVisitor) visitBoolExpr(expr *pgquery.BoolExpr, flag int) {
 		for _, arg := range expr.Args {
 			v.visitNode(arg, flag)
 		}
-		// EET De Morgan: (A AND B) -> NOT(NOT(A) OR NOT(B))
-		v.addFixMDeMorganAnd_Pg(expr, flag)
 	case pgquery.BoolExprType_OR_EXPR:
 		// OR: visit all arguments with same flag
 		for _, arg := range expr.Args {
 			v.visitNode(arg, flag)
 		}
-		// EET De Morgan: (A OR B) -> NOT(NOT(A) AND NOT(B))
-		v.addFixMDeMorganOr_Pg(expr, flag)
 	case pgquery.BoolExprType_NOT_EXPR:
 		// NOT: invert flag and visit the single argument
 		if len(expr.Args) > 0 {
@@ -365,9 +311,6 @@ func (v *PgMutateVisitor) visitSubLink(sublink *pgquery.SubLink, flag int) {
 		v.visitNode(sublink.Testexpr, flag)
 	}
 
-		// EET EXISTS <-> IN transformation mining
-		v.addFixMExistsToIn_Pg(sublink, flag)
-		v.addFixMInToExists_Pg(sublink, flag)
 	// ALL <-> ANY cross-quantifier transformation mining
 		v.addFixMAllToAnyU_Pg(sublink, flag)
 		v.addFixMAnyToAllL_Pg(sublink, flag)
@@ -415,15 +358,11 @@ func (v *PgMutateVisitor) visitChildren(node *pgquery.Node, flag int) {
 
 // Mining functions - add candidates for various mutation types
 
-// miningFuncCall: add mutation candidates for function calls (COALESCE, NULLIF)
+// miningFuncCall: add mutation candidates for function calls
 func (v *PgMutateVisitor) miningFuncCall(node *pgquery.Node, flag int) {
 	if node == nil {
 		return
 	}
-	// EET COALESCE -> CASE transformation
-	v.addFixMCoalesceToCase_Pg(node, flag)
-	// EET NULLIF -> CASE transformation
-	v.addFixMNullifToCase_Pg(node, flag)
 }
 
 // visitCaseExpr: visit a CASE expression and find candidates in sub-expressions
@@ -469,13 +408,6 @@ func (v *PgMutateVisitor) miningWhereClause(sel *pgquery.SelectStmt, flag int) {
 		v.addPgCandidate(FixMWhere1U_Pg, 1, sel.WhereClause, flag)
 		// FixMWhere0L_Pg: WHERE expr -> WHERE FALSE
 		v.addPgCandidate(FixMWhere0L_Pg, 0, sel.WhereClause, flag)
-
-		// EET transformation mutations for WHERE
-		v.addPgCandidate(FixMAndTrueU_Pg, 1, sel.WhereClause, flag)
-		v.addPgCandidate(FixMOrFalseL_Pg, 0, sel.WhereClause, flag)
-		v.addPgCandidate(FixMCaseTrueU_Pg, 1, sel.WhereClause, flag)
-		v.addPgCandidate(FixMCaseFalseL_Pg, 0, sel.WhereClause, flag)
-		v.addPgCandidate(FixMCaseRandEq_Pg, 1, sel.WhereClause, flag)
 	}
 }
 
@@ -486,10 +418,6 @@ func (v *PgMutateVisitor) miningHavingClause(sel *pgquery.SelectStmt, flag int) 
 		v.addPgCandidate(FixMHaving1U_Pg, 1, sel.HavingClause, flag)
 		// FixMHaving0L_Pg: HAVING expr -> HAVING FALSE
 		v.addPgCandidate(FixMHaving0L_Pg, 0, sel.HavingClause, flag)
-
-		// EET transformation mutations for HAVING
-		v.addPgCandidate(FixMAndTrueU_Pg+"_Having", 1, sel.HavingClause, flag)
-		v.addPgCandidate(FixMOrFalseL_Pg+"_Having", 0, sel.HavingClause, flag)
 	}
 }
 

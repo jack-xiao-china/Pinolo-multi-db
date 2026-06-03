@@ -7,6 +7,40 @@ import (
 
 // PostgreSQL EET ALL <-> ANY cross-quantifier implication mutations
 
+// findSubLinkInWhere: recursively search for a SubLink with specific type in WHERE clause
+func findSubLinkInWhere(node *pgquery.Node, targetType pgquery.SubLinkType) *pgquery.Node {
+	if node == nil {
+		return nil
+	}
+	sublink := node.GetSubLink()
+	if sublink != nil && sublink.SubLinkType == targetType {
+		return node
+	}
+	boolExpr := node.GetBoolExpr()
+	if boolExpr != nil {
+		for _, arg := range boolExpr.Args {
+			result := findSubLinkInWhere(arg, targetType)
+			if result != nil {
+				return result
+			}
+		}
+	}
+	aExpr := node.GetAExpr()
+	if aExpr != nil {
+		if aExpr.Lexpr != nil {
+			if r := findSubLinkInWhere(aExpr.Lexpr, targetType); r != nil {
+				return r
+			}
+		}
+		if aExpr.Rexpr != nil {
+			if r := findSubLinkInWhere(aExpr.Rexpr, targetType); r != nil {
+				return r
+			}
+		}
+	}
+	return nil
+}
+
 // ALL -> ANY transformation:
 // x > ALL(subq) -> x > ANY(subq) / x > SOME(subq)
 // Implication (upper): ALL result ⊆ ANY result (satisfying ALL values ⊆ satisfying SOME value)

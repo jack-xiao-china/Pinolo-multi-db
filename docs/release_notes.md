@@ -1,3 +1,14 @@
+## v0.4.0 | 2026-06-03
+- 架构重构：移除所有 EET (Equivalent Expression Testing) 等价变换规则，回归 Pinolo 论文核心 Implication Oracle 方法论
+- 删除：12 个 EET 等价变异（FixMAndTrueU/OrFalseL/CaseTrueU/CaseFalseL/CaseRandEq/DeMorganAnd/DeMorganOr/BetweenToCmp/CoalesceToCase/NullifToCase/ExistsToIn/InToExists）及其 PG/GaussDB-M 变体
+- 删除：`oracle.CheckEquivalence()` 函数、`IsEquivalence` 字段、`isEquivalenceMutation()` 函数
+- 保留：所有 Implication 变异（FixMCmpOpU/L, FixMWhere1U/0L, FixMBetweenDropUpperU/LowerU, FixMNullEqToLowerL, FixMAllToAnyU/AnyToAllL 等）
+- 新增：`ast_replace.go` 通用 AST 替换工具（从 eet_demorgan.go 提取）
+- 新增：`between_drop.go`/`pg_between_drop.go` BETWEEN 丢界蕴含变异独立文件
+- 简化：GaussDB-M visitor/stage2 不再包含 EET 变异分发
+- 简化：task runner 统一使用 `oracle.Check()` 蕴含 Oracle
+- 验证：TPC-H 24 查询 207 变异单元 0 假阳性，TPC-DS 12 查询 0 假阳性
+
 ## v0.3.1 | 2026-06-03
 - 修复：FixMAndTrueU/FixMOrFalseL tautology/contradiction 包裹添加 `ParenthesesExpr`，解决 AND/OR 优先级问题（`p OR NOT p OR p IS NULL AND E` 被错误解析）
 - 修复：FixMBetweenToCmp NOT BETWEEN 使用 De Morgan 定律替代 NOT 包裹，避免括号不平衡（`NOT(x>=a AND x<=b)` → `(x<a) OR (x>b)`）

@@ -7,28 +7,9 @@ import (
 )
 
 // ImpoMutateForMMode: mutate a SQL statement for GaussDB-M using the candidate mutation point.
-//
-// For standard MySQL mutations, delegates to ImpoMutate.
-// For M-mode specific mutations (FixMIfToCase, FixMConcatToPipe), handles directly.
+// Delegates to the standard MySQL ImpoMutate since all EET mutations have been removed.
 func ImpoMutateForMMode(rootNode ast.Node, candidate *Candidate, seed int64) (string, error) {
-	// Check if this is a M-mode specific mutation
-	switch candidate.MutationName {
-	case FixMIfToCase:
-		sql, err := doFixMIfToCase(rootNode, candidate.Node, seed)
-		if err != nil {
-			return "", err
-		}
-		return string(sql), nil
-	case FixMConcatToPipe:
-		sql, err := doFixMConcatToPipe(rootNode, candidate.Node, seed)
-		if err != nil {
-			return "", err
-		}
-		return string(sql), nil
-	default:
-		// Delegate to standard MySQL ImpoMutate for all other mutations
-		return ImpoMutate(rootNode, candidate, seed)
-	}
+	return ImpoMutate(rootNode, candidate, seed)
 }
 
 // ImpoMutateAndExecForMMode: ImpoMutateForMMode + exec
@@ -63,7 +44,6 @@ func MutateAllForMMode(sql string, seed int64) *MutateResult {
 				Name:      mutationName,
 				Sql:       newSql,
 				IsUpper:   ((candidate.U ^ candidate.Flag) ^ 1) == 1,
-				IsEquivalence: isEquivalenceMutation(mutationName),
 				Err:       err,
 				ExecResult: nil,
 			})

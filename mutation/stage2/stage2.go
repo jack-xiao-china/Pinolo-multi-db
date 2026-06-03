@@ -100,32 +100,18 @@ func ImpoMutate(rootNode ast.Node, candidate *Candidate, seed int64) (string, er
 		sql, err = doRdMRegExpU(rootNode, candidate.Node, seed)
 	case RdMRegExpL:
 		sql, err = doRdMRegExpL(rootNode, candidate.Node, seed)
-	// EET transformation mutations
-	case FixMAndTrueU:
-		sql, err = doFixMAndTrueU(rootNode, candidate.Node, seed)
-	case FixMOrFalseL:
-		sql, err = doFixMOrFalseL(rootNode, candidate.Node, seed)
-	case FixMCaseTrueU:
-		sql, err = doFixMCaseTrueU(rootNode, candidate.Node, seed)
-	case FixMCaseFalseL:
-		sql, err = doFixMCaseFalseL(rootNode, candidate.Node, seed)
-	case FixMCaseRandEq:
-		sql, err = doFixMCaseRandEq(rootNode, candidate.Node, seed)
-		// EET semantic rewrite mutations
-		case FixMDeMorganAnd:
-			sql, err = doFixMDeMorganAnd(rootNode, candidate.Node, seed)
-		case FixMDeMorganOr:
-			sql, err = doFixMDeMorganOr(rootNode, candidate.Node, seed)
-		case FixMBetweenToCmp:
-			sql, err = doFixMBetweenToCmp(rootNode, candidate.Node, seed)
-		case FixMCoalesceToCase:
-			sql, err = doFixMCoalesceToCase(rootNode, candidate.Node, seed)
-		case FixMNullifToCase:
-			sql, err = doFixMNullifToCase(rootNode, candidate.Node, seed)
-		case FixMExistsToIn:
-			sql, err = doFixMExistsToIn(rootNode, candidate.Node, seed)
-		case FixMInToExists:
-			sql, err = doFixMInToExists(rootNode, candidate.Node, seed)
+	// Implication mutations for BETWEEN
+	case FixMBetweenDropUpperU:
+		sql, err = doFixMBetweenDropUpperU(rootNode, candidate.Node, seed)
+	case FixMBetweenDropLowerU:
+		sql, err = doFixMBetweenDropLowerU(rootNode, candidate.Node, seed)
+	// Implication mutations for comparison/subquery
+	case FixMNullEqToLowerL:
+		sql, err = doFixMNullEqToLowerL(rootNode, candidate.Node)
+	case FixMAllToAnyU:
+		sql, err = doFixMAllToAnyU(rootNode, candidate.Node, seed)
+	case FixMAnyToAllL:
+		sql, err = doFixMAnyToAllL(rootNode, candidate.Node, seed)
 	}
 	if err != nil {
 		return "", err
@@ -152,7 +138,6 @@ type MutateUnit struct {
 	Name string
 	Sql string
 	IsUpper bool
-	IsEquivalence bool // true for EET semantic rewrite mutations (use CheckEquivalence oracle)
 	Err error
 
 	ExecResult *connector.Result
@@ -186,7 +171,6 @@ func MutateAll(sql string, seed int64) *MutateResult {
 				Name: mutationName,
 				Sql: newSql,
 				IsUpper: ((candidate.U^candidate.Flag)^1) == 1,
-				IsEquivalence: isEquivalenceMutation(mutationName),
 				Err: err,
 
 				ExecResult: nil,
@@ -210,53 +194,4 @@ func MutateAllAndExec(sql string, seed int64, conn connector.SQLExecutor) *Mutat
 		mutateUnit.ExecResult = conn.ExecSQL(mutateUnit.Sql)
 	}
 	return mutateResult
-}
-
-// isEquivalenceMutation: returns true if the mutation name is an EET semantic rewrite mutation
-// that should use the equivalence oracle (CheckEquivalence) instead of implication oracle (Check).
-// Equivalence mutations produce SQL that should have identical result sets to the original.
-// NOTE: Tautology/contradiction/CASE wrapping are ALSO equivalence transformations:
-//   FixMAndTrueU:  (tautology) AND E ≡ TRUE AND E ≡ E  (equivalent)
-//   FixMOrFalseL:  (contradiction) OR E ≡ FALSE OR E ≡ E (equivalent)
-//   FixMCaseTrueU: CASE WHEN TRUE THEN E ELSE rand ≡ E   (equivalent, TRUE always fires THEN)
-//   FixMCaseFalseL: CASE WHEN FALSE THEN rand ELSE E ≡ E  (equivalent, FALSE always fires ELSE)
-func isEquivalenceMutation(name string) bool {
-	equivalenceMutations := []string{
-		// Wrapping mutations (equivalent despite U/L naming)
-		FixMAndTrueU, FixMOrFalseL, FixMCaseTrueU, FixMCaseFalseL,
-		// Semantic rewrite mutations (equivalent)
-		FixMCaseRandEq,
-		FixMDeMorganAnd, FixMDeMorganOr,
-		FixMBetweenToCmp,
-		FixMCoalesceToCase, FixMNullifToCase,
-		FixMExistsToIn, FixMInToExists,
-		FixMIfToCase, FixMConcatToPipe,
-	}
-	for _, m := range equivalenceMutations {
-		if name == m {
-			return true
-		}
-	}
-	return false
-}
-
-// isEquivalenceMutationPg: returns true for PG equivalence mutations.
-// NOTE: Tautology/contradiction/CASE wrapping are ALSO equivalence transformations.
-func isEquivalenceMutationPg(name string) bool {
-	equivalenceMutationsPg := []string{
-		// Wrapping mutations (equivalent despite U/L naming)
-		FixMAndTrueU_Pg, FixMOrFalseL_Pg, FixMCaseTrueU_Pg, FixMCaseFalseL_Pg,
-		// Semantic rewrite mutations (equivalent)
-		FixMCaseRandEq_Pg,
-		FixMDeMorganAnd_Pg, FixMDeMorganOr_Pg,
-		FixMBetweenToCmp_Pg,
-		FixMCoalesceToCase_Pg, FixMNullifToCase_Pg,
-		FixMExistsToIn_Pg, FixMInToExists_Pg,
-	}
-	for _, m := range equivalenceMutationsPg {
-		if name == m {
-			return true
-		}
-	}
-	return false
 }

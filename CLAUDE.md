@@ -93,23 +93,9 @@ See `mutation/stage2/allmutations.go` for all mutation names. Mutations are cate
 - `FixMAllToAnyU` - ALL(subq) → ANY(subq) (upper: ALL ⊆ ANY)
 - `FixMAnyToAllL` - ANY(subq) → ALL(subq) (lower: ANY ⊇ ALL)
 
-**Equivalence mutations** (use `oracle.CheckEquivalence()` for exact equality):
-- `FixMAndTrueU` - E → (p OR NOT p OR p IS NULL) AND E (tautology wrapping)
-- `FixMOrFalseL` - E → (p AND NOT p AND p IS NOT NULL) OR E (contradiction wrapping)
-- `FixMCaseTrueU` - E → CASE WHEN TRUE THEN E ELSE rand END
-- `FixMCaseFalseL` - E → CASE WHEN FALSE THEN rand ELSE E END
-- `FixMCaseRandEq` - E → CASE WHEN rand THEN E ELSE E END (random branch)
-- `FixMDeMorganAnd` - (A AND B) → NOT(NOT(A) OR NOT(B)) (De Morgan AND)
-- `FixMDeMorganOr` - (A OR B) → NOT(NOT(A) AND NOT(B)) (De Morgan OR)
-- `FixMBetweenToCmp` - x BETWEEN a AND b → (x >= a) AND (x <= b)
-- `FixMCoalesceToCase` - COALESCE(a, b) → CASE WHEN a IS NOT NULL THEN a ELSE b END
-- `FixMNullifToCase` - NULLIF(a, b) → CASE WHEN a = b THEN NULL ELSE a END
-- `FixMExistsToIn` - EXISTS(subq) → NULL-safe IN equivalent
-- `FixMInToExists` - IN(subq) → NULL-safe EXISTS equivalent
-- `FixMIfToCase` - IF(cond, a, b) → CASE WHEN cond THEN a ELSE b END (GaussDB-M)
-- `FixMConcatToPipe` - CONCAT(a, b) → a || b (GaussDB-M)
-
 **PG mutations** follow the same categories with `_Pg` suffix, plus `FixMIsNotDistinctFromToLowerL_Pg` (IS NOT DISTINCT FROM → =).
+
+> **Note (v0.4.0)**: All EET equivalence mutations (FixMAndTrueU, FixMDeMorganAnd, FixMBetweenToCmp, etc.) have been removed to align with Pinolo's core Implication Oracle methodology. Only implication mutations (⊆/⊇ containment) are used.
 
 ### Test Configuration
 

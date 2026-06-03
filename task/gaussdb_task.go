@@ -160,15 +160,9 @@ func RunTaskGaussDB(config *TaskConfig, publicLogger *logrus.Logger) (*TaskResul
 			mutatedResult := mutateUnit.ExecResult
 
 			//   2.3 use oracle to detect logical bugs
-			// For equivalence mutations, use CheckEquivalence (result sets should be identical)
 			// For implication mutations, use Check (result containment relationship)
-			var check bool
-			var oracleErr error
-			if mutateUnit.IsEquivalence {
-				check, oracleErr = oracle.CheckEquivalence(originalResult, mutatedResult)
-			} else {
-				check, oracleErr = oracle.Check(originalResult, mutatedResult, isUpper)
-			}
+			// Implication Oracle: check containment relationship
+			check, oracleErr := oracle.Check(originalResult, mutatedResult, isUpper)
 			if oracleErr != nil {
 				return nil, oracleErr
 			}

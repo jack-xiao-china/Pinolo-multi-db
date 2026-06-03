@@ -522,15 +522,8 @@ func RunTask(config *TaskConfig, publicConn *connector.Connector, publicLogger *
 			mutatedSql := mutateUnit.Sql
 			mutatedResult := mutateUnit.ExecResult
 
-			//   2.3 use appropriate oracle to detect logical bugs
-			// Equivalence mutations use CheckEquivalence, implication mutations use Check
-			var check bool
-			var oracleErr error
-			if mutateUnit.IsEquivalence {
-				check, oracleErr = oracle.CheckEquivalence(originalResult, mutatedResult)
-			} else {
-				check, oracleErr = oracle.Check(originalResult, mutatedResult, isUpper)
-			}
+			// Implication Oracle: check containment relationship
+				check, oracleErr := oracle.Check(originalResult, mutatedResult, isUpper)
 			if oracleErr != nil {
 				return nil, oracleErr
 			}

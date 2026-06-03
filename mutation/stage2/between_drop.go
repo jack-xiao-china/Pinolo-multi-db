@@ -8,15 +8,8 @@ import (
 	"reflect"
 )
 
-// EET BETWEEN → Comparison transformation mutation (MySQL)
-
-// addFixMBetweenToCmp: FixMBetweenToCmp, *ast.BetweenExpr: x BETWEEN a AND b → (x >= a) AND (x <= b)
-// Semantically equivalent. If result sets differ → bug detected.
-func (v *MutateVisitor) addFixMBetweenToCmp(in *ast.BetweenExpr, flag int) {
-	if in != nil && in.Expr != nil && in.Left != nil && in.Right != nil {
-		v.addCandidate(FixMBetweenToCmp, 1, in, flag)
-	}
-}
+// BETWEEN drop-bound implication mutations (MySQL)
+// These are Implication Oracle mutations: dropping a bound expands the result set.
 
 // addFixMBetweenDropUpperU: FixMBetweenDropUpperU, *ast.BetweenExpr: x BETWEEN a AND b → x >= a
 // Implication (upper mutation): BETWEEN result ⊆ >= result (satisfying both bounds ⊆ satisfying lower bound)
@@ -36,95 +29,6 @@ func (v *MutateVisitor) addFixMBetweenDropLowerU(in *ast.BetweenExpr, flag int) 
 	}
 }
 
-// doFixMBetweenToCmp: FixMBetweenToCmp, x BETWEEN a AND b → (x >= a) AND (x <= b)
-func doFixMBetweenToCmp(rootNode ast.Node, in ast.Node, seed int64) ([]byte, error) {
-	switch in.(type) {
-	case *ast.BetweenExpr:
-		expr := in.(*ast.BetweenExpr)
-
-		oldExpr := expr.Expr
-		oldLeft := expr.Left
-		oldRight := expr.Right
-		oldNot := expr.Not
-
-		// Build: (x >= a) AND (x <= b)
-		// For NOT BETWEEN: NOT((x >= a) AND (x <= b))
-
-		// x >= a
-		geExpr := &ast.BinaryOperationExpr{
-			Op: opcode.GE,
-			L:  oldExpr,
-			R:  oldLeft,
-		}
-
-		// x <= b
-		leExpr := &ast.BinaryOperationExpr{
-			Op: opcode.LE,
-			L:  oldExpr,
-			R:  oldRight,
-		}
-
-		// (x >= a) AND (x <= b)
-		andExpr := &ast.BinaryOperationExpr{
-			Op: opcode.LogicAnd,
-			L:  &ast.ParenthesesExpr{Expr: geExpr},
-			R:  &ast.ParenthesesExpr{Expr: leExpr},
-		}
-
-		resultExpr := ast.ExprNode(andExpr)
-
-		// If NOT BETWEEN, apply De Morgan's law instead of wrapping with NOT
-		// NOT((x >= a) AND (x <= b)) → (x < a) OR (x > b)
-		// This avoids parenthesization issues with the TiDB restorer
-		if oldNot {
-			// x < a
-			ltExpr := &ast.BinaryOperationExpr{
-				Op: opcode.LT,
-				L:  oldExpr,
-				R:  oldLeft,
-			}
-
-			// x > b
-			gtExpr := &ast.BinaryOperationExpr{
-				Op: opcode.GT,
-				L:  oldExpr,
-				R:  oldRight,
-			}
-
-			// (x < a) OR (x > b)
-			resultExpr = &ast.BinaryOperationExpr{
-				Op: opcode.LogicOr,
-				L:  &ast.ParenthesesExpr{Expr: ltExpr},
-				R:  &ast.ParenthesesExpr{Expr: gtExpr},
-			}
-		}
-
-		parenExpr := &ast.ParenthesesExpr{
-			Expr: resultExpr,
-		}
-
-		// Replace BETWEEN expression with comparison
-		replaceExprInRoot(rootNode, expr, parenExpr)
-
-		sql, err := restore(rootNode)
-		if err != nil {
-			return nil, errors.Wrap(err, "[FixMBetweenToCmp]restore error")
-		}
-
-		// Restore original
-		replaceExprInRoot(rootNode, parenExpr, expr)
-		expr.Expr = oldExpr
-		expr.Left = oldLeft
-		expr.Right = oldRight
-		expr.Not = oldNot
-
-		return sql, nil
-	case nil:
-		return nil, errors.New("[FixMBetweenToCmp]type nil")
-	default:
-		return nil, errors.New("[FixMBetweenToCmp]type default " + reflect.TypeOf(in).String())
-	}
-}
 // doFixMBetweenDropUpperU: FixMBetweenDropUpperU, x BETWEEN a AND b -> x >= a (upper: drop upper bound)
 // Containment: x BETWEEN a AND b ⊆ x >= a
 // For NOT BETWEEN: x NOT BETWEEN a AND b -> x < a

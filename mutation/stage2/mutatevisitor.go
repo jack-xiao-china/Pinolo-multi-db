@@ -382,8 +382,6 @@ func (v *MutateVisitor) visitExistsSubqueryExpr(in *ast.ExistsSubqueryExpr, flag
 	if in == nil {
 		return
 	}
-	// EET EXISTS -> IN transformation mining
-	v.addFixMExistsToIn(in, flag)
 	if in.Not {
 		flag = flag ^ 1
 	}
@@ -402,8 +400,6 @@ func (v *MutateVisitor) visitPatternInExpr(in *ast.PatternInExpr, flag int) {
 		flag = flag ^ 1
 	}
 	// IN (XXX,XXX,XXX) OR IN (SUBQUERY)?
-	// EET IN -> EXISTS transformation mining (for IN subquery)
-	v.addFixMInToExists(in, flag)
 	switch (in.Sel).(type) {
 	case *ast.SubqueryExpr:
 		v.visitSubqueryExpr((in.Sel).(*ast.SubqueryExpr), flag)
@@ -492,9 +488,6 @@ func (v *MutateVisitor) visitFuncCallExpr(in *ast.FuncCallExpr, flag int) {
 	if in == nil {
 		return
 	}
-	// EET semantic rewrite mutations for COALESCE and NULLIF
-	v.addFixMCoalesceToCase(in, flag)
-	v.addFixMNullifToCase(in, flag)
 }
 
 func (v *MutateVisitor) visitFuncCastExpr(in *ast.FuncCastExpr, flag int) {
@@ -533,12 +526,6 @@ func (v *MutateVisitor) miningSelectStmt(in *ast.SelectStmt, flag int) {
 	v.addFixMHaving1U(in, flag)
 	// FixMHaving0L
 	v.addFixMHaving0L(in, flag)
-	// EET transformation mutations for WHERE
-	v.addFixMAndTrueU(in, flag)
-	v.addFixMOrFalseL(in, flag)
-	v.addFixMCaseTrueU(in, flag)
-	v.addFixMCaseFalseL(in, flag)
-	v.addFixMCaseRandEq(in, flag)
 }
 
 func (v *MutateVisitor) miningJoin(in *ast.Join, flag int) {
@@ -553,9 +540,6 @@ func (v *MutateVisitor) miningBinaryOperationExpr(in *ast.BinaryOperationExpr, f
 	v.addFixMCmpOpU(in, flag)
 	// FixMCmpOpL
 	v.addFixMCmpOpL(in, flag)
-	// EET De Morgan's Law transformations
-	v.addFixMDeMorganAnd(in, flag)
-	v.addFixMDeMorganOr(in, flag)
 		// FixMNullEqToLowerL: <=> -> = (implication lower)
 	v.addFixMNullEqToLowerL(in, flag)
 }
@@ -572,12 +556,10 @@ func (v *MutateVisitor) miningCompareSubqueryExpr(in *ast.CompareSubqueryExpr, f
 }
 
 func (v *MutateVisitor) miningBetweenExpr(in *ast.BetweenExpr, flag int) {
-	// FixMBetweenToCmp: BETWEEN → Comparison
 	// FixMBetweenDropUpperU: BETWEEN -> drop upper bound (implication upper)
 	v.addFixMBetweenDropUpperU(in, flag)
 	// FixMBetweenDropLowerU: BETWEEN -> drop lower bound (implication upper)
 	v.addFixMBetweenDropLowerU(in, flag)
-	v.addFixMBetweenToCmp(in, flag)
 }
 
 func (v *MutateVisitor) miningPatternInExpr(in *ast.PatternInExpr, flag int) {
