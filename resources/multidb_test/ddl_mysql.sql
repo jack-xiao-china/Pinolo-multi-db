@@ -1,6 +1,6 @@
 -- Multi-database test data DDL
 -- Database: mysql
--- Generated: 2026-06-03 14:58:13
+-- Generated: 2026-06-03 15:18:18
 
 DROP TABLE IF EXISTS t_int_types;
 DROP TABLE IF EXISTS t_float_types;

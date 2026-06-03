@@ -304,18 +304,31 @@ func RunTask(config *TaskConfig, publicConn *connector.Connector, publicLogger *
 		}
 	}
 
-		// 1.4b random SQL generation mode
+	// 1.4b random SQL generation mode
 		if config.GenMode != "" {
 			logger.Info("random SQL generation mode: " + config.GenMode)
-			// Discover schema from database
+
+			// Check if database has tables, if not, load default test data
 			schemaInfo, err := conn.DiscoverSchema()
 			if err != nil {
 				logger.Error("discover schema error: " + err.Error())
 				return nil, errors.Wrap(err, "[RunTask]discover schema error")
 			}
+
 			if len(schemaInfo.Tables) == 0 {
-				logger.Error("no tables found in database")
-				return nil, errors.New("[RunTask]no tables found in database for random generation")
+				logger.Info("no tables found in database, loading default multi-database test data...")
+				err = loadDefaultTestData(conn, config.DBMS, logger)
+				if err != nil {
+					logger.Error("load default test data error: " + err.Error())
+					return nil, errors.Wrap(err, "[RunTask]load default test data error")
+				}
+				// Re-discover schema after loading test data
+				schemaInfo, err = conn.DiscoverSchema()
+				if err != nil {
+					logger.Error("re-discover schema error: " + err.Error())
+					return nil, errors.Wrap(err, "[RunTask]re-discover schema error")
+				}
+				logger.Info("default test data loaded successfully, tables: ", len(schemaInfo.Tables))
 			}
 
 			// Create generator config
@@ -567,3 +580,75 @@ func RunTask(config *TaskConfig, publicConn *connector.Connector, publicLogger *
 	// end 2
 	return taskResult, nil
 }
+
+// loadDefaultTestData: Load default multi-database test data when database is empty
+// This is used in random SQL generation mode when no tables exist
+func loadDefaultTestData(conn *connector.Connector, dbms string, logger *logrus.Logger) error {
+	// Determine DDL and DML file paths based on DBMS type
+	var ddlFile, dmlFile string
+	resourceDir := "resources/multidb_test"
+
+	switch dbms {
+	case "mysql":
+		ddlFile = filepath.Join(resourceDir, "ddl_mysql.sql")
+		dmlFile = filepath.Join(resourceDir, "dml_mysql.sql")
+	case "postgresql":
+		ddlFile = filepath.Join(resourceDir, "ddl_postgresql.sql")
+		dmlFile = filepath.Join(resourceDir, "dml_postgresql.sql")
+	case "gaussdb_m":
+		ddlFile = filepath.Join(resourceDir, "ddl_gaussdb_m.sql")
+		dmlFile = filepath.Join(resourceDir, "dml_gaussdb_m.sql")
+	case "gaussdb_a":
+		ddlFile = filepath.Join(resourceDir, "ddl_gaussdb_a.sql")
+		dmlFile = filepath.Join(resourceDir, "dml_gaussdb_a.sql")
+	default:
+		return errors.New("unsupported DBMS type for default test data: " + dbms)
+	}
+
+	// Check if files exist
+	if _, err := os.Stat(ddlFile); os.IsNotExist(err) {
+		return errors.New("default DDL file not found: " + ddlFile)
+	}
+	if _, err := os.Stat(dmlFile); os.IsNotExist(err) {
+		return errors.New("default DML file not found: " + dmlFile)
+	}
+
+	// Load DDL
+	logger.Info("Loading default DDL from: ", ddlFile)
+	ddlData, err := ioutil.ReadFile(ddlFile)
+	if err != nil {
+		return errors.Wrap(err, "read default DDL file error")
+	}
+
+	ddlSqls := connector.ExtractSQL(string(ddlData))
+	for _, sql := range ddlSqls {
+		result := conn.ExecSQL(sql.Sql)
+		if result.Err != nil {
+			logger.Warn("DDL execution warning: ", result.Err.Error(), " SQL: ", sql.Sql)
+			// Continue on DDL errors (some tables might already exist)
+		}
+	}
+	logger.Info("Default DDL loaded: ", len(ddlSqls), " statements")
+
+	// Load DML
+	logger.Info("Loading default DML from: ", dmlFile)
+	dmlData, err := ioutil.ReadFile(dmlFile)
+	if err != nil {
+		return errors.Wrap(err, "read default DML file error")
+	}
+
+	dmlSqls := connector.ExtractSQL(string(dmlData))
+	successCount := 0
+	for _, sql := range dmlSqls {
+		result := conn.ExecSQL(sql.Sql)
+		if result.Err != nil {
+			logger.Warn("DML execution warning: ", result.Err.Error(), " SQL: ", sql.Sql)
+		} else {
+			successCount++
+		}
+	}
+	logger.Info("Default DML loaded: ", successCount, "/", len(dmlSqls), " statements successful")
+
+	return nil
+}
+

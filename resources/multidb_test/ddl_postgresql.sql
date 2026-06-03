@@ -1,6 +1,6 @@
 -- Multi-database test data DDL
 -- Database: postgresql
--- Generated: 2026-06-03 14:58:13
+-- Generated: 2026-06-03 15:18:18
 
 DROP TABLE IF EXISTS t_int_types;
 DROP TABLE IF EXISTS t_float_types;
@@ -52,7 +52,7 @@ CREATE TABLE t_string_types (
 
 CREATE INDEX idx_t_string_types_c_char ON t_string_types (c_char);
 CREATE INDEX idx_t_string_types_c_varchar ON t_string_types (c_varchar);
-CREATE GIN INDEX idx_t_string_types_c_text ON t_string_types (c_text);
+CREATE INDEX idx_t_string_types_c_text ON t_string_types USING gin (to_tsvector('english', c_text));
 
 CREATE TABLE t_binary_types (
     id SERIAL NOT NULL,
@@ -119,6 +119,6 @@ CREATE TABLE t_index_test (
 );
 
 CREATE INDEX idx_t_index_test_c_btree ON t_index_test (c_btree);
-CREATE GIN INDEX idx_t_index_test_c_fulltext ON t_index_test (c_fulltext);
+CREATE INDEX idx_t_index_test_c_fulltext ON t_index_test USING gin (to_tsvector('english', c_fulltext));
 CREATE INDEX idx_composite ON t_index_test (c_composite1, c_composite2);
 

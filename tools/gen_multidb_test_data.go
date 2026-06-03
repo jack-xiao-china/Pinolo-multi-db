@@ -93,8 +93,8 @@ var indexMappings = map[string]IndexMapping{
 	"primary":    {"PRIMARY KEY", "PRIMARY KEY", "PRIMARY KEY", "PRIMARY KEY"},
 	"unique":     {"UNIQUE", "UNIQUE", "UNIQUE", "UNIQUE"},
 	"btree":      {"INDEX", "INDEX", "INDEX", "INDEX"},
-	"fulltext":   {"FULLTEXT INDEX", "GIN INDEX", "FULLTEXT INDEX", "GIN INDEX"},
-	"spatial":    {"SPATIAL INDEX", "GIST INDEX", "SPATIAL INDEX", "GIST INDEX"},
+	"fulltext":   {"FULLTEXT INDEX", "INDEX", "FULLTEXT INDEX", "INDEX"},
+	"spatial":    {"SPATIAL INDEX", "INDEX", "SPATIAL INDEX", "INDEX"},
 }
 
 // ColumnDef 列定义
@@ -330,9 +330,28 @@ func generateDDL(path string, dbType DatabaseType) {
 					if idxType == "" {
 						idxType = "btree"
 					}
+
+					// PostgreSQL/GaussDB-A 不支持在 TEXT 类型上直接创建 GIN 索引
+					// 跳过 fulltext 索引或使用 tsvector 转换
+					if idxType == "fulltext" && (col.TypeKey == "text" || col.TypeKey == "mediumtext" || col.TypeKey == "longtext") {
+						// 使用 to_tsvector 函数创建函数索引
+						indexName := fmt.Sprintf("idx_%s_%s", table.Name, col.Name)
+						fmt.Fprintf(f, "CREATE INDEX %s ON %s USING gin (to_tsvector('english', %s));\n", indexName, table.Name, col.Name)
+						continue
+					}
+
 					idxStr := getIndexString(idxType, dbType)
 					indexName := fmt.Sprintf("idx_%s_%s", table.Name, col.Name)
-					fmt.Fprintf(f, "CREATE %s %s ON %s (%s);\n", idxStr, indexName, table.Name, col.Name)
+
+					// PostgreSQL/GaussDB-A 使用 USING 子句指定索引方法
+					usingClause := ""
+					if idxType == "fulltext" {
+						usingClause = " USING gin"
+					} else if idxType == "spatial" {
+						usingClause = " USING gist"
+					}
+
+					fmt.Fprintf(f, "CREATE %s %s ON %s%s (%s);\n", idxStr, indexName, table.Name, usingClause, col.Name)
 				}
 			}
 			// 复合索引
