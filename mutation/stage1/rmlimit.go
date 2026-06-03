@@ -2,18 +2,24 @@ package stage1
 
 import (
 	"github.com/pingcap/tidb/parser/ast"
-	"github.com/pingcap/tidb/parser/test_driver"
-	_ "github.com/pingcap/tidb/parser/test_driver"
 )
 
-// rmLimit: remove LIMIT. Actually, limit x -> limit 2147483647
+// rmLimit: remove LIMIT clause completely (conservative approach)
+//
+// Conservative strategy:
+// - Remove LIMIT clause entirely instead of replacing with large value
+// - This allows the database to return all rows naturally
+// - Preserves query semantics better than arbitrary large limits
+//
+// For example:
+//
+// SELECT * FROM T LIMIT 10 OFFSET 5 -> SELECT * FROM T
 func rmLimit(in ast.Node) bool {
-	if limit, ok := in.(*ast.Limit); ok {
-		limit.Count = &test_driver.ValueExpr{
-			Datum: test_driver.NewDatum(2147483647),
+	if selectStmt, ok := in.(*ast.SelectStmt); ok {
+		if selectStmt.Limit != nil {
+			selectStmt.Limit = nil
+			return true
 		}
-		limit.Offset = nil
-		return true
 	}
 	return false
 }

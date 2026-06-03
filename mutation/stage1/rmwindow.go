@@ -2,14 +2,19 @@ package stage1
 
 import (
 	"github.com/pingcap/tidb/parser/ast"
-	"github.com/pingcap/tidb/parser/test_driver"
 )
 
-// rmWindow: remove window functions.
+// rmWindow: remove window functions in a conservative way.
+//
+// Conservative strategy:
+// - Keep window function structure
+// - Simplify window definition to empty OVER() clause
+// - Remove named window specifications from SELECT statement
 //
 // For example:
 //
-// SELECT SUM(C1) OVER w as sum_c1 FROM T WINDOW w AS (...) -> SELECT 1 FROM T
+// SELECT SUM(C1) OVER w as sum_c1 FROM T WINDOW w AS (PARTITION BY C2 ORDER BY C3)
+// -> SELECT SUM(C1) OVER () as sum_c1 FROM T
 func rmWindow(in ast.Node) bool {
 	change := false
 	if selectStmt, ok := in.(*ast.SelectStmt); ok {
@@ -23,13 +28,15 @@ func rmWindow(in ast.Node) bool {
 			if field.Expr == nil {
 				continue
 			}
-			if _, ok := field.Expr.(*ast.WindowFuncExpr); ok {
+			if windowFunc, ok := field.Expr.(*ast.WindowFuncExpr); ok {
 				change = true
-				field.Expr = &test_driver.ValueExpr{
-					Datum: test_driver.NewDatum(1),
-				}
-			} // end of field.Expr.(*ast.WindowFuncExpr)
-		} // end of range fieldList.Fields
-	} // end of in.(*ast.FieldList)
+				// Simplify window definition: remove partition and order by
+				// Spec is a value type, so we can directly modify its pointer fields
+				windowFunc.Spec.PartitionBy = nil
+				windowFunc.Spec.OrderBy = nil
+				windowFunc.Spec.Frame = nil
+			}
+		}
+	}
 	return change
 }
