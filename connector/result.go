@@ -57,6 +57,7 @@ func (result *Result) ToString() string {
 }
 
 // Result.FlatRows: [["1","2"],["3","4"]] -> ["1,2", "3,4"]
+// Numeric values are normalized to prevent "0" vs "0.0000" false mismatches
 func (result *Result) FlatRows() []string {
 	flt := make([]string, 0)
 	for _, r := range result.Rows {
@@ -65,11 +66,80 @@ func (result *Result) FlatRows() []string {
 			if i != 0 {
 				t += ","
 			}
-			t += e
+			t += normalizeNumeric(e)
 		}
 		flt = append(flt, t)
 	}
 	return flt
+}
+
+// normalizeNumeric: normalize a numeric string to a canonical form
+// "0.0000" → "0", "1.5000" → "1.5", "4294967295.0000" → "4294967295"
+// Non-numeric strings are returned unchanged
+func normalizeNumeric(s string) string {
+	if len(s) == 0 {
+		return s
+	}
+
+	// Quick check: must start with digit, '-', '+' or '.' to be numeric
+	ch := s[0]
+	if ch != '-' && ch != '+' && ch != '.' && (ch < '0' || ch > '9') {
+		return s
+	}
+
+	// Check if the string is a valid number (integer or decimal)
+	hasDot := false
+	allDigits := true
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if c == '.' {
+			if hasDot {
+				return s // two dots, not a number
+			}
+			hasDot = true
+		} else if c == '-' || c == '+' {
+			if i != 0 {
+				return s // sign not at start
+			}
+		} else if c < '0' || c > '9' {
+			allDigits = false
+			break
+		}
+	}
+	if !allDigits {
+		return s
+	}
+
+	// If no decimal point, return as-is (integer)
+	if !hasDot {
+		return s
+	}
+
+	// Strip trailing zeros after decimal point
+	// "1.5000" → "1.5", "0.0000" → "0"
+	dotIdx := -1
+	for i := 0; i < len(s); i++ {
+		if s[i] == '.' {
+			dotIdx = i
+			break
+		}
+	}
+
+	end := len(s)
+	for end > dotIdx+1 && s[end-1] == '0' {
+		end--
+	}
+	// If we stripped all decimal digits, also remove the dot
+	if end == dotIdx+1 {
+		end = dotIdx
+	}
+
+	result := s[:end]
+	// Handle "-0" → "0"
+	if result == "-0" || result == "+0" {
+		return "0"
+	}
+	return result
 }
 
 // Result.IsEmpty: if the result is empty

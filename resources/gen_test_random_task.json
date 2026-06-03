@@ -1,0 +1,23 @@
+{
+  "outputPath": "./output",
+  "dbms": "mysql",
+  "taskId": 100,
+  "host": "127.0.0.1",
+  "port": 3306,
+  "username": "tpcc",
+  "password": "Taurus@123",
+  "dbname": "gen_test",
+  "seed": 123456,
+  "genMode": "eet_style",
+  "genDepth": 3,
+  "genQueries": 200,
+  "genSeed": 42,
+  "genJoin": true,
+  "genSelfJoin": true,
+  "genSubquery": true,
+  "genUnion": true,
+  "genCTE": true,
+  "genGroupBy": true,
+  "genOrderBy": true,
+  "genLimit": true
+}

@@ -98,19 +98,19 @@ func (g *QueryGenerator) generateConstantExpr(typeConstraint string) string {
 }
 
 // generateComparisonExpr: generate a type-safe comparison expression
-// For PostgreSQL/GaussDB-A strict type checking, both sides must be type-compatible
+// Both MySQL and PostgreSQL modes use type-compatible comparisons
 func (g *QueryGenerator) generateComparisonExpr(scope *Scope, depth int) string {
-	if scope.NumColumns() > 0 && g.isPostgreSQLDialect() {
-		// PostgreSQL strict mode: pick a column and compare with a compatible expression
+	if scope.NumColumns() > 0 {
+		// Pick a column and compare with a type-compatible value
 		col := pickRandom(g.Rand, scope.Columns)
 		left := fmt.Sprintf("%s.%s", col.TableAlias, col.ColumnName)
 		right := g.generateTypeCompatibleValue(scope, col.ColumnType, depth)
 		op := g.pickComparisonOp()
 		return fmt.Sprintf("(%s %s %s)", left, op, right)
 	}
-	// MySQL mode: relaxed type coercion allows mixed types
-	left := g.generateExpression(scope, depth+1, "any")
-	right := g.generateExpression(scope, depth+1, "any")
+	// Fallback: no columns available, use constant comparison
+	left := g.generateConstantExpr("int")
+	right := g.generateConstantExpr("int")
 	op := g.pickComparisonOp()
 	return fmt.Sprintf("(%s %s %s)", left, op, right)
 }
@@ -139,7 +139,7 @@ func (g *QueryGenerator) generateTypeCompatibleValue(scope *Scope, colType strin
 			}
 		}
 		return fmt.Sprintf("%.2f", float64(g.randInt(-100, 100))/10.0)
-	case "varchar", "char", "text", "bpchar", "name":
+	case "varchar", "char", "text", "bpchar", "name", "longtext", "mediumtext", "tinytext", "enum":
 		if g.randBool() {
 			strCols := scope.ColumnsOfType("string")
 			if len(strCols) > 0 {
@@ -148,6 +148,33 @@ func (g *QueryGenerator) generateTypeCompatibleValue(scope *Scope, colType strin
 			}
 		}
 		return fmt.Sprintf("'str_%d'", g.randInt(0, 999))
+	case "date":
+		year := 2000 + g.Rand.Intn(25)
+		month := 1 + g.Rand.Intn(12)
+		day := 1 + g.Rand.Intn(28)
+		return fmt.Sprintf("'%04d-%02d-%02d'", year, month, day)
+	case "timestamp", "timestamptz", "datetime":
+		year := 2000 + g.Rand.Intn(25)
+		month := 1 + g.Rand.Intn(12)
+		day := 1 + g.Rand.Intn(28)
+		hour := g.Rand.Intn(24)
+		min := g.Rand.Intn(60)
+		sec := g.Rand.Intn(60)
+		return fmt.Sprintf("'%04d-%02d-%02d %02d:%02d:%02d'", year, month, day, hour, min, sec)
+	case "time":
+		hour := g.Rand.Intn(24)
+		min := g.Rand.Intn(60)
+		sec := g.Rand.Intn(60)
+		return fmt.Sprintf("'%02d:%02d:%02d'", hour, min, sec)
+	case "year":
+		return fmt.Sprintf("%d", 2000+g.Rand.Intn(25))
+	case "bit":
+		return fmt.Sprintf("b'%d'", g.Rand.Intn(2))
+	case "bool", "boolean":
+		if g.randBool() {
+			return "1"
+		}
+		return "0"
 	default:
 		return g.generateExpression(scope, depth+1, "any")
 	}

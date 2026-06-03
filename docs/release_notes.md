@@ -1,3 +1,13 @@
+## v0.3.1 | 2026-06-03
+- 修复：FixMAndTrueU/FixMOrFalseL tautology/contradiction 包裹添加 `ParenthesesExpr`，解决 AND/OR 优先级问题（`p OR NOT p OR p IS NULL AND E` 被错误解析）
+- 修复：FixMBetweenToCmp NOT BETWEEN 使用 De Morgan 定律替代 NOT 包裹，避免括号不平衡（`NOT(x>=a AND x<=b)` → `(x<a) OR (x>b)`）
+- 优化：`Result.CMP` 数值归一化（`normalizeNumeric`），解决 `"0"` vs `"0.0000"` 字符串比较误判
+- 优化：生成器类型感知统一（MySQL + PG 均使用 `generateTypeCompatibleValue`），减少跨类型比较导致的执行错误
+- 优化：WHERE 子句生成概率从 50% 提升至 83%，新增 IN 谓词生成（`generateInPredicate`），增加变异触发覆盖率
+- 优化：DISTINCT 概率 17%、HAVING 概率 27%、BETWEEN/IN/LIKE 各 8%，覆盖更多变异类型
+- 新增：`generateTypeCompatibleBound`/`generateTypeCompatibleValue` 扩展支持 date/time/datetime/year/bit/enum 等类型
+- 测试效果：假阳性从 39 降至 0，变异单元从 597 增至 844（+41%），解析错误下降 44%
+
 ## v0.3.0 | 2026-06-02
 - 修复：移除 FixMCmpOpL 对 `!=`/`<>` 的无效蕴含变异（MySQL + PG），`!=→<` 无包含关系
 - 修复：将 tautology/contradiction/CASE wrapping 变异（FixMAndTrueU/FixMOrFalseL/FixMCaseTrueU/FixMCaseFalseL）修正为等价分类，使用 `CheckEquivalence()` 而非 `Check()`

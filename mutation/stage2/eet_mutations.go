@@ -36,11 +36,14 @@ func doFixMAndTrueU(rootNode ast.Node, in ast.Node, seed int64) ([]byte, error) 
 		pExpr := findPredicateForEET(sel, seed)
 		tautology := buildTautologyExpr(pExpr)
 
-		// WHERE E -> WHERE (tautology) AND E
+		// WHERE E -> WHERE ((tautology)) AND ((E))
+		// MUST wrap both sides in ParenthesesExpr to prevent AND/OR precedence issues
+		// Without parens: "p OR NOT p OR p IS NULL AND E" parses as
+		// "p OR NOT p OR (p IS NULL AND E)" due to AND having higher precedence than OR
 		sel.Where = &ast.BinaryOperationExpr{
 			Op: opcode.LogicAnd,
-			L:  tautology,
-			R:  old,
+			L:  &ast.ParenthesesExpr{Expr: tautology},
+			R:  &ast.ParenthesesExpr{Expr: old},
 		}
 
 		sql, err := restore(rootNode)
@@ -77,11 +80,15 @@ func doFixMOrFalseL(rootNode ast.Node, in ast.Node, seed int64) ([]byte, error) 
 		pExpr := findPredicateForEET(sel, seed)
 		contradiction := buildContradictionExpr(pExpr)
 
-		// WHERE E -> WHERE (contradiction) OR E
+		// WHERE E -> WHERE ((contradiction)) OR ((E))
+		// MUST wrap both sides in ParenthesesExpr to prevent AND/OR precedence issues
+		// Without parens: "p AND NOT p AND p IS NOT NULL OR E" parses as
+		// "(p AND NOT p AND p IS NOT NULL) OR E" which is correct, but wrapping is safer
+		// and consistent with FixMAndTrueU
 		sel.Where = &ast.BinaryOperationExpr{
 			Op: opcode.LogicOr,
-			L:  contradiction,
-			R:  old,
+			L:  &ast.ParenthesesExpr{Expr: contradiction},
+			R:  &ast.ParenthesesExpr{Expr: old},
 		}
 
 		sql, err := restore(rootNode)

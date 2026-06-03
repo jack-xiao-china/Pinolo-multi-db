@@ -73,11 +73,29 @@ func doFixMBetweenToCmp(rootNode ast.Node, in ast.Node, seed int64) ([]byte, err
 
 		resultExpr := ast.ExprNode(andExpr)
 
-		// If NOT BETWEEN, wrap with NOT
+		// If NOT BETWEEN, apply De Morgan's law instead of wrapping with NOT
+		// NOT((x >= a) AND (x <= b)) → (x < a) OR (x > b)
+		// This avoids parenthesization issues with the TiDB restorer
 		if oldNot {
-			resultExpr = &ast.UnaryOperationExpr{
-				Op: opcode.Not,
-				V:  andExpr,
+			// x < a
+			ltExpr := &ast.BinaryOperationExpr{
+				Op: opcode.LT,
+				L:  oldExpr,
+				R:  oldLeft,
+			}
+
+			// x > b
+			gtExpr := &ast.BinaryOperationExpr{
+				Op: opcode.GT,
+				L:  oldExpr,
+				R:  oldRight,
+			}
+
+			// (x < a) OR (x > b)
+			resultExpr = &ast.BinaryOperationExpr{
+				Op: opcode.LogicOr,
+				L:  &ast.ParenthesesExpr{Expr: ltExpr},
+				R:  &ast.ParenthesesExpr{Expr: gtExpr},
 			}
 		}
 

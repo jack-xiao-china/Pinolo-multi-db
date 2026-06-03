@@ -128,8 +128,8 @@ CREATE TABLE t_enum_set (
 CREATE TABLE t_json_spatial (
     id            INT NOT NULL AUTO_INCREMENT,
     c_json        JSON,
-    c_point       POINT,
-    c_geometry    GEOMETRY,
+    c_point       POINT NOT NULL,
+    c_geometry    GEOMETRY NOT NULL,
     PRIMARY KEY (id),
     SPATIAL INDEX idx_point (c_point),
     SPATIAL INDEX idx_geometry (c_geometry)

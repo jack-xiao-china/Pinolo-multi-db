@@ -8,7 +8,7 @@ import (
 // Generates 4 query shapes (plain, UNION, CTE, derived table) like SQLancer EET
 
 // generatePlainSelect: generate a plain SELECT query
-// SELECT ... FROM ... [WHERE ...] [GROUP BY ...] [HAVING ...] [ORDER BY ...] [LIMIT ...]
+// SELECT [DISTINCT] ... FROM ... [WHERE ...] [GROUP BY ...] [HAVING ...] [ORDER BY ...] [LIMIT ...]
 func (g *QueryGenerator) generatePlainSelect() string {
 	scope := NewScope(g.Schema, 0)
 
@@ -21,18 +21,25 @@ func (g *QueryGenerator) generatePlainSelect() string {
 	// 2. Build SELECT list (1-3 columns with aliases)
 	selectList := g.generateSelectList(scope)
 
-	// 3. Build WHERE clause (optional)
-	whereClause := ""
-	if g.randBool() && scope.NumColumns() > 0 {
-		whereClause = g.generateBoolExpr(scope, 0)
+	// 2b. Add DISTINCT with ~20% probability (triggers FixMDistinctU/L mutations)
+	distinctClause := ""
+	if g.d6() == 1 {
+		distinctClause = "DISTINCT "
 	}
 
-	// 4. Build GROUP BY + HAVING (optional)
+	// 3. Build WHERE clause (high probability ~83% to trigger FixMWhere1U/0L, FixMCmpOpU/L, etc.)
+	whereClause := ""
+	if scope.NumColumns() > 0 && g.d6() <= 5 {
+		whereClause = g.generateWhereExpr(scope, 0)
+	}
+
+	// 4. Build GROUP BY + HAVING (optional, ~40% probability)
 	groupByClause := ""
 	havingClause := ""
-	if g.Config.EnableGroupBy && g.randBool() && scope.NumColumns() > 0 {
+	if g.Config.EnableGroupBy && g.d6() <= 2 && scope.NumColumns() > 0 {
 		groupByClause = g.generateGroupByClause(scope)
-		if g.randBool() {
+		// HAVING with ~67% probability when GROUP BY exists (triggers FixMHaving1U/0L)
+		if g.d6() <= 4 {
 			havingClause = g.generateBoolExpr(scope, 0)
 		}
 	}
@@ -50,7 +57,7 @@ func (g *QueryGenerator) generatePlainSelect() string {
 	}
 
 	// Assemble the query
-	sql := "SELECT " + selectList
+	sql := "SELECT " + distinctClause + selectList
 	sql += " FROM " + fromClause
 	if whereClause != "" {
 		sql += " WHERE " + whereClause
@@ -69,6 +76,62 @@ func (g *QueryGenerator) generatePlainSelect() string {
 	}
 
 	return sql
+}
+
+// generateWhereExpr: generate a WHERE clause expression with bias toward comparison predicates
+// This ensures more mutation opportunities (FixMCmpOpU/L, FixMWhere1U/0L, FixMInNullU, etc.)
+func (g *QueryGenerator) generateWhereExpr(scope *Scope, depth int) string {
+	if depth >= g.Config.MaxDepth || scope.NumColumns() == 0 {
+		return g.generateBoolLeaf(scope)
+	}
+
+	choice := g.d12()
+	if choice <= 5 {
+		// 42% comparison predicate → triggers FixMCmpOpU/L, FixMNullEqToLowerL
+		return g.generateComparisonPredicate(scope, depth)
+	}
+	if choice <= 8 {
+		// 25% AND/OR → triggers FixMDeMorganAnd/Or
+		return g.generateBoolBinaryOp(scope, depth)
+	}
+	if choice <= 9 {
+		// 8% IS NULL → basic predicate
+		return g.generateIsNullPredicate(scope, depth)
+	}
+	if choice <= 10 {
+		// 8% BETWEEN → triggers FixMBetweenToCmp, FixMBetweenDropUpperU/LowerU
+		return g.generateBetweenPredicate(scope, depth)
+	}
+	if choice <= 11 {
+		// 8% IN expression → triggers FixMInNullU
+		return g.generateInPredicate(scope, depth)
+	}
+	// 8% LIKE → triggers RdMLikeU/L
+	return g.generateLikePredicate(scope, depth)
+}
+
+// generateInPredicate: generate an IN expression
+// Triggers FixMInNullU mutation (adding NULL to IN list)
+func (g *QueryGenerator) generateInPredicate(scope *Scope, depth int) string {
+	if scope.NumColumns() == 0 {
+		return g.generateBoolLeaf(scope)
+	}
+
+	col := pickRandom(g.Rand, scope.Columns)
+	expr := fmt.Sprintf("%s.%s", col.TableAlias, col.ColumnName)
+
+	// Generate 2-4 values compatible with the column type
+	numVals := g.randInt(2, 4)
+	vals := make([]string, numVals)
+	for i := 0; i < numVals; i++ {
+		vals[i] = g.generateTypeCompatibleValue(scope, col.ColumnType, depth+1)
+	}
+
+	not := ""
+	if g.randBool() {
+		not = "NOT "
+	}
+	return fmt.Sprintf("(%s %sIN (%s))", expr, not, joinStrings(vals, ", "))
 }
 
 // generateSelectList: generate a SELECT list (1-3 columns with aliases)

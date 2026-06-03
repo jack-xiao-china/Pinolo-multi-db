@@ -54,19 +54,20 @@ func (g *QueryGenerator) generateBoolLeaf(scope *Scope) string {
 }
 
 // generateComparisonPredicate: generate a comparison predicate
-// PostgreSQL mode uses type-safe column-to-column or column-to-constant comparison
+// Both MySQL and PostgreSQL modes use type-safe column-to-column or column-to-constant comparison
+// This dramatically reduces execution errors from cross-type comparisons (e.g., int > varchar)
 func (g *QueryGenerator) generateComparisonPredicate(scope *Scope, depth int) string {
-	if scope.NumColumns() > 0 && g.isPostgreSQLDialect() {
-		// PostgreSQL strict type checking: pick a column and compare with compatible value
+	if scope.NumColumns() > 0 {
+		// Pick a column and compare with a type-compatible value
 		col := pickRandom(g.Rand, scope.Columns)
 		left := fmt.Sprintf("%s.%s", col.TableAlias, col.ColumnName)
 		right := g.generateTypeCompatibleValue(scope, col.ColumnType, depth)
 		op := g.pickComparisonOp()
 		return fmt.Sprintf("(%s %s %s)", left, op, right)
 	}
-	// MySQL mode: relaxed type coercion allows mixed types
-	left := g.generateExpression(scope, depth+1, "any")
-	right := g.generateExpression(scope, depth+1, "any")
+	// Fallback: no columns available, use constant comparison
+	left := g.generateConstantExpr("int")
+	right := g.generateConstantExpr("int")
 	op := g.pickComparisonOp()
 	return fmt.Sprintf("(%s %s %s)", left, op, right)
 }
@@ -88,10 +89,9 @@ func (g *QueryGenerator) pickBoolBinaryOp() string {
 }
 
 // generateIsNullPredicate: generate IS NULL / IS NOT NULL predicate
-// Type-safe: use a column reference directly
+// Always use a column reference directly for type safety
 func (g *QueryGenerator) generateIsNullPredicate(scope *Scope, depth int) string {
-	if g.isPostgreSQLDialect() && scope.NumColumns() > 0 {
-		// Use column reference directly for type safety
+	if scope.NumColumns() > 0 {
 		col := pickRandom(g.Rand, scope.Columns)
 		expr := fmt.Sprintf("%s.%s", col.TableAlias, col.ColumnName)
 		if g.randBool() {
@@ -99,18 +99,18 @@ func (g *QueryGenerator) generateIsNullPredicate(scope *Scope, depth int) string
 		}
 		return fmt.Sprintf("%s IS NOT NULL", expr)
 	}
-	expr := g.generateExpression(scope, depth+1, "any")
+	// Fallback: no columns
 	if g.randBool() {
-		return fmt.Sprintf("(%s) IS NULL", expr)
+		return "(1) IS NULL"
 	}
-	return fmt.Sprintf("(%s) IS NOT NULL", expr)
+	return "(1) IS NOT NULL"
 }
 
 // generateBetweenPredicate: generate BETWEEN predicate
-// PostgreSQL mode uses type-safe column BETWEEN with compatible bounds
+// Both MySQL and PostgreSQL modes use type-safe column BETWEEN with compatible bounds
 func (g *QueryGenerator) generateBetweenPredicate(scope *Scope, depth int) string {
-	if g.isPostgreSQLDialect() && scope.NumColumns() > 0 {
-		// PostgreSQL strict: column BETWEEN compatible_constant AND compatible_constant
+	if scope.NumColumns() > 0 {
+		// Pick a column and use type-compatible bounds
 		col := pickRandom(g.Rand, scope.Columns)
 		expr := fmt.Sprintf("%s.%s", col.TableAlias, col.ColumnName)
 		low := g.generateTypeCompatibleBound(col.ColumnType)
@@ -119,12 +119,12 @@ func (g *QueryGenerator) generateBetweenPredicate(scope *Scope, depth int) strin
 		if g.randBool() {
 			not = "NOT "
 		}
-		return fmt.Sprintf("%s %sBETWEEN %s AND %s", expr, not, low, high)
+		return fmt.Sprintf("(%s) %sBETWEEN %s AND %s", expr, not, low, high)
 	}
-	// MySQL mode: relaxed type coercion
-	expr := g.generateExpression(scope, depth+1, "any")
-	low := g.generateLeaf(scope, "any")
-	high := g.generateLeaf(scope, "any")
+	// Fallback: no columns, use constants
+	expr := g.generateConstantExpr("int")
+	low := g.generateConstantExpr("int")
+	high := g.generateConstantExpr("int")
 	not := ""
 	if g.randBool() {
 		not = "NOT "
@@ -140,12 +140,30 @@ func (g *QueryGenerator) generateTypeCompatibleBound(colType string) string {
 		return fmt.Sprintf("%d", g.randInt(0, 100))
 	case "float", "double", "decimal", "numeric", "float4", "float8", "double precision":
 		return fmt.Sprintf("%.2f", float64(g.randInt(0, 100))/10.0)
-	case "varchar", "char", "text", "bpchar", "name":
+	case "varchar", "char", "text", "bpchar", "name", "longtext", "mediumtext", "tinytext", "enum":
 		return fmt.Sprintf("'str_%d'", g.randInt(0, 50))
 	case "date":
-		return "'2020-01-01'"
+		year := 2000 + g.Rand.Intn(25)
+		month := 1 + g.Rand.Intn(12)
+		day := 1 + g.Rand.Intn(28)
+		return fmt.Sprintf("'%04d-%02d-%02d'", year, month, day)
 	case "timestamp", "timestamptz", "datetime":
-		return "'2020-01-01 12:00:00'"
+		year := 2000 + g.Rand.Intn(25)
+		month := 1 + g.Rand.Intn(12)
+		day := 1 + g.Rand.Intn(28)
+		hour := g.Rand.Intn(24)
+		min := g.Rand.Intn(60)
+		sec := g.Rand.Intn(60)
+		return fmt.Sprintf("'%04d-%02d-%02d %02d:%02d:%02d'", year, month, day, hour, min, sec)
+	case "time":
+		hour := g.Rand.Intn(24)
+		min := g.Rand.Intn(60)
+		sec := g.Rand.Intn(60)
+		return fmt.Sprintf("'%02d:%02d:%02d'", hour, min, sec)
+	case "year":
+		return fmt.Sprintf("%d", 2000+g.Rand.Intn(25))
+	case "bit":
+		return fmt.Sprintf("b'%d'", g.Rand.Intn(2))
 	default:
 		return fmt.Sprintf("%d", g.randInt(0, 100))
 	}
@@ -154,8 +172,8 @@ func (g *QueryGenerator) generateTypeCompatibleBound(colType string) string {
 // generateLikePredicate: generate LIKE predicate
 // Always use a string column on the left for type safety
 func (g *QueryGenerator) generateLikePredicate(scope *Scope, depth int) string {
-	if g.isPostgreSQLDialect() && scope.NumColumns() > 0 {
-		// Use a string column directly for LIKE (PostgreSQL requires string type)
+	if scope.NumColumns() > 0 {
+		// Prefer string columns for LIKE
 		strCols := scope.ColumnsOfType("string")
 		if len(strCols) > 0 {
 			col := pickRandom(g.Rand, strCols)
@@ -167,16 +185,18 @@ func (g *QueryGenerator) generateLikePredicate(scope *Scope, depth int) string {
 			}
 			return fmt.Sprintf("%s %sLIKE %s", expr, not, pattern)
 		}
-		// No string columns, skip LIKE
-		return g.generateBoolLeaf(scope)
+		// No string columns, use any column with CAST
+		col := pickRandom(g.Rand, scope.Columns)
+		expr := fmt.Sprintf("CAST(%s.%s AS CHAR)", col.TableAlias, col.ColumnName)
+		pattern := g.generateLikePattern()
+		not := ""
+		if g.randBool() {
+			not = "NOT "
+		}
+		return fmt.Sprintf("%s %sLIKE %s", expr, not, pattern)
 	}
-	expr := g.generateExpression(scope, depth+1, "string")
-	pattern := g.generateLikePattern()
-	not := ""
-	if g.randBool() {
-		not = "NOT "
-	}
-	return fmt.Sprintf("(%s) %sLIKE %s", expr, not, pattern)
+	// Fallback: no columns
+	return g.generateBoolLeaf(scope)
 }
 
 // generateLikePattern: generate a random LIKE pattern string
