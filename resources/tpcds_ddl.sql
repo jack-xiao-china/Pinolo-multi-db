@@ -549,3 +549,65 @@ CREATE TABLE web_returns (
     wr_net_loss               DECIMAL(7,2),
     PRIMARY KEY (wr_item_sk, wr_order_number)
 );
+
+-- ============================================================
+-- Indexes for query optimization
+-- ============================================================
+
+-- date_dim indexes
+CREATE INDEX idx_date_dim_date ON date_dim(d_date);
+CREATE INDEX idx_date_dim_year ON date_dim(d_year);
+CREATE INDEX idx_date_dim_ymd ON date_dim(d_year, d_moy, d_dom);
+
+-- item indexes
+CREATE INDEX idx_item_category ON item(i_category);
+CREATE INDEX idx_item_manager ON item(i_manager_id);
+CREATE INDEX idx_item_price ON item(i_current_price);
+
+-- customer indexes
+CREATE INDEX idx_customer_demo ON customer(c_current_cdemo_sk);
+CREATE INDEX idx_customer_addr ON customer(c_current_addr_sk);
+
+-- customer_demographics indexes
+CREATE INDEX idx_cd_gender_marital ON customer_demographics(cd_gender, cd_marital_status, cd_education_status);
+
+-- customer_address indexes
+CREATE INDEX idx_ca_zip ON customer_address(ca_zip);
+CREATE INDEX idx_ca_country_state ON customer_address(ca_country, ca_state);
+
+-- store indexes
+CREATE INDEX idx_store_name ON store(s_store_name);
+
+-- warehouse indexes
+CREATE INDEX idx_warehouse_zip ON warehouse(w_zip);
+
+-- store_sales indexes
+CREATE INDEX idx_ss_date ON store_sales(ss_sold_date_sk);
+CREATE INDEX idx_ss_item ON store_sales(ss_item_sk);
+CREATE INDEX idx_ss_store ON store_sales(ss_store_sk);
+CREATE INDEX idx_ss_customer ON store_sales(ss_customer_sk);
+CREATE INDEX idx_ss_cdemo ON store_sales(ss_cdemo_sk);
+CREATE INDEX idx_ss_addr ON store_sales(ss_addr_sk);
+CREATE INDEX idx_ss_promo ON store_sales(ss_promo_sk);
+
+-- store_returns indexes
+CREATE INDEX idx_sr_date ON store_returns(sr_returned_date_sk);
+CREATE INDEX idx_sr_item ON store_returns(sr_item_sk);
+CREATE INDEX idx_sr_store ON store_returns(sr_store_sk);
+CREATE INDEX idx_sr_reason ON store_returns(sr_reason_sk);
+
+-- catalog_sales indexes
+CREATE INDEX idx_cs_date ON catalog_sales(cs_sold_date_sk);
+CREATE INDEX idx_cs_item ON catalog_sales(cs_item_sk);
+CREATE INDEX idx_cs_warehouse ON catalog_sales(cs_warehouse_sk);
+CREATE INDEX idx_cs_bill_addr ON catalog_sales(cs_bill_addr_sk);
+CREATE INDEX idx_cs_promo ON catalog_sales(cs_promo_sk);
+
+-- catalog_returns indexes
+CREATE INDEX idx_cr_date ON catalog_returns(cr_returned_date_sk);
+CREATE INDEX idx_cr_item ON catalog_returns(cr_item_sk);
+
+-- inventory indexes
+CREATE INDEX idx_inv_date ON inventory(inv_date_sk);
+CREATE INDEX idx_inv_item ON inventory(inv_item_sk);
+CREATE INDEX idx_inv_warehouse ON inventory(inv_warehouse_sk);
