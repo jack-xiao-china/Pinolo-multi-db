@@ -204,6 +204,25 @@ type TaskResult struct {
 	ImpoBugsNum            int    `json:"impoBugsNum"`
 	SaveBugErrNum          int    `json:"saveBugErrNum"`
 	EndTime                string `json:"endTime"`
+	// False positive monitoring (v0.4.1)
+	PotentialFalsePositivesNum int                    `json:"potentialFalsePositivesNum"` // Number of potential false positives detected
+	FalsePositiveDetails       []FalsePositiveRecord  `json:"falsePositiveDetails"`       // Detailed records of potential false positives
+}
+
+// FalsePositiveRecord: Record detailed information about a potential false positive
+type FalsePositiveRecord struct {
+	BugId            int    `json:"bugId"`            // Bug ID from the original detection
+	SqlId            int    `json:"sqlId"`            // SQL ID from DML file
+	MutationName     string `json:"mutationName"`     // Mutation type name
+	OriginalSql      string `json:"originalSql"`      // Original SQL query
+	MutatedSql       string `json:"mutatedSql"`       // Mutated SQL query
+	OriginalRows     int    `json:"originalRows"`     // Number of rows in original result
+	MutatedRows      int    `json:"mutatedRows"`      // Number of rows in mutated result
+	IsUpper          bool   `json:"isUpper"`          // Whether this is an upper mutation
+	ReExecutions     int    `json:"reExecutions"`     // Number of re-executions for verification
+	ConsistentCount  int    `json:"consistentCount"`  // Number of times bug was consistently reproduced
+	SuspicionReason  string `json:"suspicionReason"`  // Reason why this is suspected as false positive
+	Timestamp        string `json:"timestamp"`        // When this was detected
 }
 
 // TaskResult.SaveTaskResult: output to taskPath/result.json
@@ -431,21 +450,25 @@ func RunTask(config *TaskConfig, publicConn *connector.Connector, publicLogger *
 	// 2. run
 	logger.Info("Running **************************************************")
 	taskResult := &TaskResult{
-		StartTime:              startTime,
-		DDLSqlsNum:             len(ddlSqls),
-		DMLSqlsNum:             len(dmlSqls),
-		EndInitTime:            endInitTime,
-		Stage1ErrNum:           0,
-		Stage1ExecErrNum:       0,
-		Stage1SkippedNum:       0,
-		Stage2ErrNum:           0,
-		Stage2UnitNum:          0,
-		Stage2UnitErrNum:       0,
-		Stage2UnitExecErrNum:   0,
-		ImpoBugsNum:            0,
-		SaveBugErrNum:          0,
-		EndTime:                "",
+		StartTime:                  startTime,
+		DDLSqlsNum:                 len(ddlSqls),
+		DMLSqlsNum:                 len(dmlSqls),
+		EndInitTime:                endInitTime,
+		Stage1ErrNum:               0,
+		Stage1ExecErrNum:           0,
+		Stage1SkippedNum:           0,
+		Stage2ErrNum:               0,
+		Stage2UnitNum:              0,
+		Stage2UnitErrNum:           0,
+		Stage2UnitExecErrNum:       0,
+		ImpoBugsNum:                0,
+		SaveBugErrNum:              0,
+		EndTime:                    "",
+		PotentialFalsePositivesNum: 0,
+		FalsePositiveDetails:       make([]FalsePositiveRecord, 0),
 	}
+	// Create false positive detector (v0.4.1)
+	fpDetector := oracle.NewFalsePositiveDetector(conn, 3, 0.67, 5)
 	// **************************************************
 	// for each sql, do:
 	total := len(dmlSqls)
@@ -536,6 +559,33 @@ func RunTask(config *TaskConfig, publicConn *connector.Connector, publicLogger *
 				if publicLogger != nil {
 					publicLogger.Info("task-", strconv.Itoa(config.TaskId), " detected a logical bug!!! bugId = ",
 						bugId, " sqlId = ", dmlSql.Id, " mutationName = ", mutationName)
+				}
+
+				// False positive detection (v0.4.1)
+				fpAnalysis, fpErr := fpDetector.AnalyzePotentialFalsePositive(
+					originalSql, mutatedSql, isUpper, mutationName)
+				if fpErr != nil {
+					logger.Warn("False positive analysis failed for bug-", bugId, ": ", fpErr)
+				} else if fpAnalysis.IsPotentialFalsePositive {
+					taskResult.PotentialFalsePositivesNum += 1
+					fpRecord := FalsePositiveRecord{
+						BugId:           bugId,
+						SqlId:           dmlSql.Id,
+						MutationName:    mutationName,
+						OriginalSql:     originalSql,
+						MutatedSql:      mutatedSql,
+						OriginalRows:    fpAnalysis.OriginalRows,
+						MutatedRows:     fpAnalysis.MutatedRows,
+						IsUpper:         isUpper,
+						ReExecutions:    fpAnalysis.TotalExecutions,
+						ConsistentCount: fpAnalysis.ConsistentCount,
+						SuspicionReason: fpAnalysis.SuspicionReason,
+						Timestamp:       time.Now().Format(time.RFC3339),
+					}
+					taskResult.FalsePositiveDetails = append(taskResult.FalsePositiveDetails, fpRecord)
+					logger.Warn("Potential false positive detected! bugId=", bugId,
+						" reason=", fpAnalysis.SuspicionReason,
+						" consistency=", fpAnalysis.ConsistentCount, "/", fpAnalysis.TotalExecutions)
 				}
 
 				bugReport := &BugReport{
