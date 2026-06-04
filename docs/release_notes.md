@@ -1,3 +1,11 @@
+## v0.7.5 | 2026-06-05
+- 修复：PG `FixMAnyToAllL_Pg` 变异器排除 IN-style 子查询 — IN-style（`x IN (subq)`）无法转换为 ALL，仅对 operator-style（`x = ANY(subq)`）应用变异
+- 集成测试验证（v0.7.5）：MySQL 243 变异单元 0 bugs, PG 115 变异单元 0 bugs, GaussDB-M 26 变异单元 0 bugs, GaussDB-A 0 变异单元 0 bugs, 全部 0 假阳性, 0 Error Oracle
+
+## v0.7.4 | 2026-06-05
+- 修复：MySQL 连接池数据库上下文丢失 — 在 DSN 中包含数据库名，确保所有连接都有数据库上下文
+- 集成测试验证（v0.7.4）：MySQL 243 变异单元 0 bugs, PG 117 变异单元 0 bugs, GaussDB-M 26 变异单元 0 bugs, GaussDB-A 0 变异单元 0 bugs, 全部 0 假阳性
+
 ## v0.7.2 | 2026-06-04
 - 修复：PG numeric 格式转换支持大整数 — `formatPgNumeric()` 使用 float64 替代 int64 解析数字，支持超过 int64 容量（9.2e18）的 PostgreSQL numeric 值
 - 集成测试验证（v0.7.2）：MySQL 0 bugs, PG 0 bugs, GaussDB-M 0 bugs, GaussDB-A 0 bugs, 全部 0 假阳性
