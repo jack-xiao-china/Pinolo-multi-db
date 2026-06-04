@@ -59,9 +59,14 @@ func (v *PgMutateVisitor) addFixMAllToAnyU_Pg(sublink *pgquery.SubLink, flag int
 }
 
 // addFixMAnyToAllL_Pg: FixMAnyToAllL_Pg, SubLink(ANY/SOME): ANY(subq) -> ALL(subq) (lower mutation)
+// Only apply to operator-style ANY (e.g., x = ANY(subq)), not IN-style (e.g., x IN (subq))
 func (v *PgMutateVisitor) addFixMAnyToAllL_Pg(sublink *pgquery.SubLink, flag int) {
 	if sublink != nil && sublink.SubLinkType == pgquery.SubLinkType_ANY_SUBLINK && sublink.Subselect != nil && sublink.Testexpr != nil {
-		v.addPgCandidate(FixMAnyToAllL_Pg, 1, nil, flag)
+		// Check if this is an operator-style ANY (has oper_name) vs IN-style (no oper_name)
+		// IN-style subqueries cannot be converted to ALL because they have different semantics
+		if len(sublink.OperName) > 0 {
+			v.addPgCandidate(FixMAnyToAllL_Pg, 1, nil, flag)
+		}
 	}
 }
 
