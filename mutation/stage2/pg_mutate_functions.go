@@ -10,6 +10,16 @@ import (
 // PostgreSQL mutation implementation functions
 // These functions perform actual mutations on the pg_query AST.
 
+// Helper: create a boolean TRUE/FALSE constant node for PostgreSQL.
+// PostgreSQL requires WHERE/HAVING/ON conditions to be boolean, not integer.
+func makeTrueNode() *pgquery.Node {
+	return &pgquery.Node{Node: &pgquery.Node_Boolean{Boolean: &pgquery.Boolean{Boolval: true}}}
+}
+
+func makeFalseNode() *pgquery.Node {
+	return &pgquery.Node{Node: &pgquery.Node_Boolean{Boolean: &pgquery.Boolean{Boolval: false}}}
+}
+
 // ------------------------------------------------
 // WHERE clause mutations
 // ------------------------------------------------
@@ -35,7 +45,7 @@ func doFixMWhere1U_Pg(rootNode *pgquery.ParseResult, node *pgquery.Node) (string
 			// Save old WHERE clause
 			oldWhere := sel.WhereClause
 			// Mutate: WHERE xxx -> WHERE TRUE
-			sel.WhereClause = pgquery.MakeAConstIntNode(1, 0)
+			sel.WhereClause = makeTrueNode()
 			// Deparse
 			sql, err := pgquery.Deparse(rootNode)
 			if err != nil {
@@ -74,7 +84,7 @@ func doFixMWhere0L_Pg(rootNode *pgquery.ParseResult, node *pgquery.Node) (string
 			// Save old WHERE clause
 			oldWhere := sel.WhereClause
 			// Mutate: WHERE xxx -> WHERE FALSE
-			sel.WhereClause = pgquery.MakeAConstIntNode(0, 0)
+			sel.WhereClause = makeFalseNode()
 			// Deparse
 			sql, err := pgquery.Deparse(rootNode)
 			if err != nil {
@@ -117,7 +127,7 @@ func doFixMHaving1U_Pg(rootNode *pgquery.ParseResult, node *pgquery.Node) (strin
 			// Save old HAVING clause
 			oldHaving := sel.HavingClause
 			// Mutate: HAVING xxx -> HAVING TRUE
-			sel.HavingClause = pgquery.MakeAConstIntNode(1, 0)
+			sel.HavingClause = makeTrueNode()
 			// Deparse
 			sql, err := pgquery.Deparse(rootNode)
 			if err != nil {
@@ -156,7 +166,7 @@ func doFixMHaving0L_Pg(rootNode *pgquery.ParseResult, node *pgquery.Node) (strin
 			// Save old HAVING clause
 			oldHaving := sel.HavingClause
 			// Mutate: HAVING xxx -> HAVING FALSE
-			sel.HavingClause = pgquery.MakeAConstIntNode(0, 0)
+			sel.HavingClause = makeFalseNode()
 			// Deparse
 			sql, err := pgquery.Deparse(rootNode)
 			if err != nil {
@@ -227,7 +237,7 @@ func mutateJoinOnToTrue(fromNode *pgquery.Node, rootNode *pgquery.ParseResult) (
 		// Mutate ON quals
 		if join.Quals != nil {
 			oldQuals := join.Quals
-			join.Quals = pgquery.MakeAConstIntNode(1, 0)
+			join.Quals = makeTrueNode()
 			sql, err := pgquery.Deparse(rootNode)
 			join.Quals = oldQuals
 			if err == nil {
@@ -297,7 +307,7 @@ func mutateJoinOnToFalse(fromNode *pgquery.Node, rootNode *pgquery.ParseResult) 
 		// Mutate ON quals
 		if join.Quals != nil {
 			oldQuals := join.Quals
-			join.Quals = pgquery.MakeAConstIntNode(0, 0)
+			join.Quals = makeFalseNode()
 			sql, err := pgquery.Deparse(rootNode)
 			join.Quals = oldQuals
 			if err == nil {

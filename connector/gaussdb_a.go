@@ -1,6 +1,7 @@
 package connector
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
 	"github.com/pkg/errors"
@@ -56,7 +57,9 @@ func (gaConn *GaussDBAConnector) ExecSQL(sqlStr string) *Result {
 		Err:         nil,
 	}
 
-	rows, err := gaConn.db.Query(sqlStr)
+	ctx, cancel := context.WithTimeout(context.Background(), DefaultQueryTimeout)
+	defer cancel()
+	rows, err := gaConn.db.QueryContext(ctx, sqlStr)
 	if err != nil {
 		result.Err = errors.Wrap(err, "[GaussDBAConnector.ExecSQL]query error")
 		return result
@@ -99,7 +102,7 @@ func (gaConn *GaussDBAConnector) ExecSQL(sqlStr string) *Result {
 		rowData := make([]string, len(columns))
 		for i, v := range values {
 			if v == nil {
-				rowData[i] = "NULL"
+				rowData[i] = NullMarker
 			} else {
 				rowData[i] = fmt.Sprintf("%v", v)
 			}

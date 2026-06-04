@@ -3,9 +3,13 @@ package connector
 import (
 	"context"
 	"fmt"
+	"math"
+	"strconv"
+	"strings"
+	"time"
+
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/pkg/errors"
-	"time"
 )
 
 // PostgreSQLConnector: connect to native PostgreSQL database
@@ -68,7 +72,9 @@ func (pgConn *PostgreSQLConnector) ExecSQL(sql string) *Result {
 		Err:         nil,
 	}
 
-	rows, err := pgConn.pool.Query(context.Background(), sql)
+	ctx, cancel := context.WithTimeout(context.Background(), DefaultQueryTimeout)
+	defer cancel()
+	rows, err := pgConn.pool.Query(ctx, sql)
 	if err != nil {
 		result.Err = errors.Wrap(err, "[PostgreSQLConnector.ExecSQL]query error")
 		return result
@@ -93,9 +99,22 @@ func (pgConn *PostgreSQLConnector) ExecSQL(sql string) *Result {
 		rowData := make([]string, len(values))
 		for i, v := range values {
 			if v == nil {
-				rowData[i] = "NULL"
+				rowData[i] = NullMarker
 			} else {
-				rowData[i] = fmt.Sprintf("%v", v)
+				s := fmt.Sprintf("%v", v)
+				// Detect and convert pgtype.Numeric internal struct format
+				// With braces: "{6457002442 -4 false finite true}"
+				// Without braces: "79694271428571428571 -16 false finite true"
+				if strings.Contains(s, "finite") || strings.Contains(s, "NaN") {
+					cleaned := s
+					if strings.HasPrefix(cleaned, "{") {
+						cleaned = strings.TrimPrefix(cleaned, "{")
+						cleaned = strings.TrimSuffix(cleaned, "}")
+					}
+					cleaned = "{" + strings.TrimSpace(cleaned) + "}"
+					s = formatPgNumeric(cleaned)
+				}
+				rowData[i] = s
 			}
 		}
 		result.Rows = append(result.Rows, rowData)
@@ -197,4 +216,44 @@ func (pgConn *PostgreSQLConnector) Close() {
 	if pgConn.pool != nil {
 		pgConn.pool.Close()
 	}
+}
+
+// formatPgNumeric: convert pgtype.Numeric internal format to decimal string.
+// Input format: "{digits exp NaN infinityModifier valid}"
+// e.g., "{6457002442 -4 false finite true}" → "645700.2442"
+// e.g., "{6457002442 -5 false finite true}" → "64570.02442"
+// If parsing fails, return the original string unchanged.
+func formatPgNumeric(s string) string {
+	// Remove braces
+	s = strings.TrimPrefix(s, "{")
+	s = strings.TrimSuffix(s, "}")
+
+	parts := strings.Fields(s)
+	if len(parts) < 3 {
+		return s
+	}
+
+	// Parse integer digits
+	digits, err := strconv.ParseInt(parts[0], 10, 64)
+	if err != nil {
+		return s
+	}
+
+	// Parse exponent
+	exp, err := strconv.Atoi(parts[1])
+	if err != nil {
+		return s
+	}
+
+	// Check sign (parts[2] is "false" for positive, "true" for negative)
+	negative := parts[2] == "true"
+
+	// Compute the value
+	value := float64(digits) * math.Pow(10, float64(exp))
+	if negative {
+		value = -value
+	}
+
+	// Format as decimal string
+	return strconv.FormatFloat(value, 'f', -1, 64)
 }

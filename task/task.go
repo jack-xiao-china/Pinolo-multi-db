@@ -49,6 +49,10 @@ type TaskConfig struct {
 	GenGroupBy  bool   `json:"genGroupBy"`  // enable GROUP BY/HAVING (default: true)
 	GenOrderBy  bool   `json:"genOrderBy"`  // enable ORDER BY (default: true)
 	GenLimit    bool   `json:"genLimit"`    // enable LIMIT (default: true)
+	// Aggregate testing mode (v0.7.0)
+	// When true, Stage1 preserves aggregate functions and GROUP BY,
+	// and the Oracle uses numeric comparison instead of set containment.
+	AggregateMode bool `json:"aggregateMode"`
 }
 
 // TaskConfig.GetTaskPath:
@@ -485,8 +489,13 @@ func RunTask(config *TaskConfig, publicConn *connector.Connector, publicLogger *
 			cur += 1
 		}
 
-		// 2.1 stage1.InitAndExec
-		stage1Result := stage1.InitAndExec(dmlSql.Sql, conn)
+		// 2.1 stage1.InitAndExec (or InitForAggregateAndExec if aggregate mode)
+		var stage1Result *stage1.InitResult
+		if config.AggregateMode {
+			stage1Result = stage1.InitForAggregateAndExec(dmlSql.Sql, conn)
+		} else {
+			stage1Result = stage1.InitAndExec(dmlSql.Sql, conn)
+		}
 		// handle stage1 error
 		if stage1Result.Err != nil {
 			taskResult.Stage1ErrNum += 1
@@ -520,130 +529,20 @@ func RunTask(config *TaskConfig, publicConn *connector.Connector, publicLogger *
 			//logger.Error("--------------------------------------------------")
 			continue
 		}
-		// for each mutation unit
+		// for each mutation unit (prioritized by historical hit rate)
 		taskResult.Stage2UnitNum += len(stage2Result.MutateUnits)
-		for _, mutateUnit := range stage2Result.MutateUnits {
-			// handle stage2 unit error
-			if mutateUnit.Err != nil {
-				taskResult.Stage2UnitErrNum += 1
-				//logger.Error("==================================================")
-				//logger.Error("[Stage2 Unit Error]", "(", dmlSql.Id, "-", mutateUnit.Name, ")", mutateUnit.Sql)
-				//logger.Error(mutateUnit.Err)
-				//logger.Error("==================================================")
-				continue
+		stage2.GlobalMutationStats.PrioritizeUnits(stage2Result.MutateUnits)
+		mCtx := &MutationLoopContext{
+			Conn: conn, Config: config, Logger: logger, PublicLogger: publicLogger,
+			TaskResult: taskResult, FpDetector: fpDetector,
+			AggregateMode: config.AggregateMode,
+		}
+		for _, mu := range stage2Result.MutateUnits {
+			adapter := &MutateUnitAdapter{
+				Name: mu.Name, Sql: mu.Sql, IsUpper: mu.IsUpper,
+				Err: mu.Err, ExecResult: mu.ExecResult,
 			}
-			// handle stage2 unit exec error
-			if mutateUnit.ExecResult.Err != nil {
-				taskResult.Stage2UnitExecErrNum += 1
-
-				// Error Oracle (v0.6.0): if original succeeded but upper mutation errors, it may be a bug
-				// Upper mutation means mutated result should be a superset of original,
-				// so if it errors instead of returning results, that's suspicious.
-				if mutateUnit.IsUpper && originalResult.Err == nil {
-					// Re-execute to confirm reproducibility
-					reExecResult := conn.ExecSQL(mutateUnit.Sql)
-					if reExecResult.Err != nil {
-						// Confirmed: mutation consistently errors → Error Oracle bug
-						bugId := taskResult.ImpoBugsNum
-						taskResult.ImpoBugsNum += 1
-						taskResult.ErrorOracleBugsNum += 1
-
-						errMsg := mutateUnit.ExecResult.Err.Error()
-						logger.Info("ERROR ORACLE bug! bugId=", bugId, " sqlId=", dmlSql.Id,
-							" mutation=", mutateUnit.Name, " error=", errMsg)
-
-						bugReport := &BugReport{
-							ReportTime:     time.Now().String(),
-							BugId:          bugId,
-							SqlId:          dmlSql.Id,
-							MutationName:   mutateUnit.Name,
-							IsUpper:        mutateUnit.IsUpper,
-							OriginalSql:    originalSql,
-							OriginalResult: originalResult,
-							MutatedSql:     mutateUnit.Sql,
-							MutatedResult:  mutateUnit.ExecResult,
-							IsErrorOracle:  true,
-							ErrorMsg:       errMsg,
-						}
-						err2 := bugReport.SaveBugReport(config.GetTaskBugsPath())
-						if err2 != nil {
-							taskResult.SaveBugErrNum += 1
-							logger.Error("save error oracle bug error: ", err2)
-						}
-					}
-				}
-				continue
-			}
-
-			mutationName := mutateUnit.Name
-			isUpper := mutateUnit.IsUpper
-			mutatedSql := mutateUnit.Sql
-			mutatedResult := mutateUnit.ExecResult
-
-			// Implication Oracle: check containment relationship
-				check, oracleErr := oracle.Check(originalResult, mutatedResult, isUpper)
-			if oracleErr != nil {
-				logger.Warn("oracle check error for sqlId=", dmlSql.Id, " mutation=", mutationName, ": ", oracleErr)
-				continue
-			}
-			if !check {
-				// logical bug!!!
-				bugId := taskResult.ImpoBugsNum
-				taskResult.ImpoBugsNum += 1
-
-				logger.Info("logical bug!!! bugId = ", bugId, " sqlId = ", dmlSql.Id, " mutationName = ", mutationName)
-				if publicLogger != nil {
-					publicLogger.Info("task-", strconv.Itoa(config.TaskId), " detected a logical bug!!! bugId = ",
-						bugId, " sqlId = ", dmlSql.Id, " mutationName = ", mutationName)
-				}
-
-				// False positive detection (v0.4.1)
-				fpAnalysis, fpErr := fpDetector.AnalyzePotentialFalsePositive(
-					originalSql, mutatedSql, isUpper, mutationName)
-				if fpErr != nil {
-					logger.Warn("False positive analysis failed for bug-", bugId, ": ", fpErr)
-				} else if fpAnalysis.IsPotentialFalsePositive {
-					taskResult.PotentialFalsePositivesNum += 1
-					fpRecord := FalsePositiveRecord{
-						BugId:           bugId,
-						SqlId:           dmlSql.Id,
-						MutationName:    mutationName,
-						OriginalSql:     originalSql,
-						MutatedSql:      mutatedSql,
-						OriginalRows:    fpAnalysis.OriginalRows,
-						MutatedRows:     fpAnalysis.MutatedRows,
-						IsUpper:         isUpper,
-						ReExecutions:    fpAnalysis.TotalExecutions,
-						ConsistentCount: fpAnalysis.ConsistentCount,
-						SuspicionReason: fpAnalysis.SuspicionReason,
-						Timestamp:       time.Now().Format(time.RFC3339),
-					}
-					taskResult.FalsePositiveDetails = append(taskResult.FalsePositiveDetails, fpRecord)
-					logger.Warn("Potential false positive detected! bugId=", bugId,
-						" reason=", fpAnalysis.SuspicionReason,
-						" consistency=", fpAnalysis.ConsistentCount, "/", fpAnalysis.TotalExecutions)
-				}
-
-				bugReport := &BugReport{
-					ReportTime:     time.Now().String(),
-					BugId:          bugId,
-					SqlId:          dmlSql.Id,
-					MutationName:   mutationName,
-					IsUpper:        isUpper,
-					OriginalSql:    originalSql,
-					OriginalResult: originalResult,
-					MutatedSql:     mutatedSql,
-					MutatedResult:  mutatedResult,
-				}
-				err := bugReport.SaveBugReport(config.GetTaskBugsPath())
-				if err != nil {
-					taskResult.SaveBugErrNum += 1
-					logger.Error("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")
-					logger.Error("[Save Bug Error] ", "bug-", bugId, "-", dmlSql.Id, "-", mutationName, ":", err)
-					logger.Error("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")
-					continue
-				}
-			}
+			processMutationUnit(adapter, dmlSql.Id, originalSql, originalResult, mCtx)
 		}
 	}
 	// 2.4 save task result

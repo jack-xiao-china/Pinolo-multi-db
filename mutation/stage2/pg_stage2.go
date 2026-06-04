@@ -138,16 +138,80 @@ func MutateAllForPostgreSQL(sql string, seed int64) *PgMutateResult {
 	}
 
 	root := v.Root
+
+	// Phase 1: Single-point mutations (k=1)
+	singleUnits := make([]*PgMutateUnit, 0)
 	for mutationName, candidateList := range v.Candidates {
 		for _, candidate := range candidateList {
 			newSql, err := PgImpoMutate(root, candidate, seed)
+			unit := &PgMutateUnit{
+				Name:       mutationName,
+				Sql:        newSql,
+				IsUpper:    ((candidate.U ^ candidate.Flag) ^ 1) == 1,
+				Err:        err,
+				ExecResult: nil,
+			}
+			singleUnits = append(singleUnits, unit)
+			mutateResult.MutateUnits = append(mutateResult.MutateUnits, unit)
+		}
+	}
+
+	// Phase 2: k=2 combinatorial mutations (optimized with CalCandidates caching)
+	// Same-AST dual mutation: apply mutation B on mutation A's cached AST.
+	type pgCachedCandidates struct {
+		root       *pgquery.ParseResult
+		candidates map[string][]*PgCandidate
+	}
+	k2SqlCache := make(map[string]*pgCachedCandidates)
+	maxK2Pairs := 0 // Disabled for integration tests
+	k2Count := 0
+
+	for i := 0; i < len(singleUnits) && k2Count < maxK2Pairs; i++ {
+		if singleUnits[i].Err != nil {
+			continue
+		}
+		sqlI := singleUnits[i].Sql
+
+		for j := i + 1; j < len(singleUnits) && k2Count < maxK2Pairs; j++ {
+			if singleUnits[j].Err != nil {
+				continue
+			}
+			if singleUnits[i].IsUpper != singleUnits[j].IsUpper {
+				continue
+			}
+			if singleUnits[i].Name == singleUnits[j].Name {
+				continue
+			}
+
+			// Get or cache CalCandidates for mutation i's SQL
+			cached, ok := k2SqlCache[sqlI]
+			if !ok {
+				v2, err2 := CalCandidatesForPostgreSQL(sqlI)
+				if err2 != nil {
+					continue
+				}
+				cached = &pgCachedCandidates{root: v2.Root, candidates: v2.Candidates}
+				k2SqlCache[sqlI] = cached
+			}
+
+			candsJ, exists := cached.candidates[singleUnits[j].Name]
+			if !exists || len(candsJ) == 0 {
+				continue
+			}
+
+			newSql, err2 := PgImpoMutate(cached.root, candsJ[0], seed+int64(j))
+			if err2 != nil {
+				continue
+			}
+
 			mutateResult.MutateUnits = append(mutateResult.MutateUnits, &PgMutateUnit{
-				Name:           mutationName,
-				Sql:            newSql,
-				IsUpper:        ((candidate.U ^ candidate.Flag) ^ 1) == 1,
-				Err:            err,
-				ExecResult:     nil,
+				Name:       singleUnits[i].Name + "+" + singleUnits[j].Name,
+				Sql:        newSql,
+				IsUpper:    singleUnits[i].IsUpper,
+				Err:        nil,
+				ExecResult: nil,
 			})
+			k2Count++
 		}
 	}
 

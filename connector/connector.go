@@ -1,6 +1,7 @@
 package connector
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
 	_ "github.com/go-sql-driver/mysql"
@@ -8,6 +9,9 @@ import (
 	"strconv"
 	"time"
 )
+
+// DefaultQueryTimeout: maximum time allowed for a single query execution
+const DefaultQueryTimeout = 60 * time.Second
 
 // Connector: connect to MySQL, execute raw sql statements, return raw execution result or error.
 type Connector struct {
@@ -53,7 +57,9 @@ func NewConnector(host string, port int, username string, password string, dbnam
 // Connector.ExecSQL: execute sql, return *Result.
 func (conn *Connector) ExecSQL(sql string) *Result {
 	startTime := time.Now()
-	rows, err := conn.db.Query(sql)
+	ctx, cancel := context.WithTimeout(context.Background(), DefaultQueryTimeout)
+	defer cancel()
+	rows, err := conn.db.QueryContext(ctx, sql)
 	if err != nil {
 		return &Result{
 			Err: errors.Wrap(err, "[Connector.ExecSQL]execute sql error"),
@@ -118,7 +124,7 @@ func (conn *Connector) ExecSQL(sql string) *Result {
 		dataS := make([]string, len(columnTypes))
 		for i, _ := range data {
 			if data[i] == nil {
-				dataS[i] = "NULL"
+				dataS[i] = NullMarker
 			} else {
 				dataS[i] = string(data[i])
 			}

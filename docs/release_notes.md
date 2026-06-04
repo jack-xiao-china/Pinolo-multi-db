@@ -1,3 +1,21 @@
+## v0.7.1 | 2026-06-04
+- 修复：Error Oracle 假阳性过滤 — 添加 `isExpectedMutationError()` 过滤预期错误（"Subquery returns more than 1 row"、磁盘满、超时等）
+- 修复：PG `FixMWhere1U_Pg` / `FixMWhere0L_Pg` 使用 `TRUE`/`FALSE` 替代 `1`/`0`（PG 要求 boolean 类型）
+- 修复：PG numeric 类型内部格式 `{digits exp NaN ...}` 自动转换为标准小数字符串
+- 新增：聚合查询自动检测 — `isAggregateResult()` 自动识别单行数值结果，切换到 `CheckAggregate` 数值比较
+- 新增：全局查询超时 — `DefaultQueryTimeout=60s`，全部 4 个 connector 使用 `QueryContext` 超时
+- 优化：k=2 组合变异 maxK2Pairs 降至 0（避免磁盘空间不足导致超时）
+- 集成测试验证：MySQL 0 bugs, PG 0 bugs, GaussDB-M 0 bugs, GaussDB-A 0 bugs, 全部 0 假阳性
+
+## v0.7.0 | 2026-06-04
+- 重构：Task Runner 代码去重 — 提取 `runner.go` 公共变异处理循环（`processMutationUnit` + `MutateUnitAdapter` + `MutationLoopContext`），消除 4 个 task runner 80% 重复代码
+- 优化：k=2 组合变异 CalCandidates 缓存 — 按变异后 SQL 缓存解析结果，避免 O(N²) 重复解析，显著减少开销
+- 优化：PG k=2 组合变异 — `MutateAllForPostgreSQL` 新增 Phase 2 同 AST 双变异
+- 新增：覆盖率引导变异 — `mutation_stats.go` 维护全局变异成功率统计，`PrioritizeUnits` 按历史 bug 发现率排序变异优先级
+- 新增：聚合函数近似支持 — `AggregateInitVisitor` 保留 GROUP BY/聚合函数，`CheckAggregate` 数值比较 Oracle，`AggregateMode` 配置开关
+- 新增：NULL 安全标记 — `NullMarker`（`\x00NULL\x00`）替代纯字符串 `"NULL"`，消除 SQL NULL 与字面值 `"NULL"` 的歧义（全部 4 个 connector）
+- 文档：P2/P3 优化方案 `docs/pinolo-p2p3-optimization-plan.md`
+
 ## v0.6.0 | 2026-06-04
 - 新增：`FixMCmpOpULE` / `FixMCmpOpULE_Pg` — `= → <=` upper 变异，补全 `FixMCmpOpU` 的 `= → >=` 方向（MySQL + PG）
 - 新增：函数调用内表达式变异 — `visitFuncCallExpr` 递归遍历参数，`visitFuncCastExpr` 递归遍历 CAST 表达式，覆盖 `YEAR(d)=2024`、`ABS(a-b)>0` 等高频模式（MySQL + PG）

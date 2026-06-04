@@ -8,6 +8,15 @@ import (
 	"time"
 )
 
+// NullMarker: special string used to represent SQL NULL values in result rows.
+// Uses non-printable NUL characters to distinguish from literal string "NULL".
+const NullMarker = "\x00NULL\x00"
+
+// IsNullMarker: check if a string is the NULL marker.
+func IsNullMarker(s string) bool {
+	return s == NullMarker
+}
+
 // Result:
 //
 // query result, for example:
@@ -44,7 +53,11 @@ func (result *Result) ToString() string {
 	for i, row := range result.Rows {
 		str += "row " + strconv.Itoa(i) + ":"
 		for _, data := range row {
-			str += " " + data
+			if data == NullMarker {
+				str += " NULL"
+			} else {
+				str += " " + data
+			}
 		}
 		str += "\n"
 	}
@@ -79,6 +92,10 @@ func (result *Result) FlatRows() []string {
 // Non-numeric strings are returned unchanged
 func normalizeNumeric(s string) string {
 	if len(s) == 0 {
+		return s
+	}
+	// Don't normalize NULL markers
+	if s == NullMarker {
 		return s
 	}
 

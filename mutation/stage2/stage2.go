@@ -189,17 +189,41 @@ func MutateAll(sql string, seed int64) *MutateResult {
 		}
 	}
 
-	// Phase 2: k=2 combinatorial mutations
+	// Phase 2: k=2 combinatorial mutations (optimized same-AST dual mutation)
 	// Combine pairs of mutations with the same direction (both upper or both lower)
 	// that target different AST nodes. Only combine if both succeed.
 	// Soundness: if mutated1 ⊇ original AND mutated2 ⊇ original,
 	// then applying both still gives mutated12 ⊇ original (upper).
-	maxK2Pairs := 50 // limit to avoid explosion
+	//
+	// Optimization: cache CalCandidates results per unique mutated SQL to avoid
+	// redundant parsing. ImpoMutate modifies/restores AST in-place, so cached
+	// candidates remain valid across calls.
+	type cachedCandidates struct {
+		root       ast.Node
+		candidates map[string][]*Candidate
+	}
+	k2SqlCache := make(map[string]*cachedCandidates)
+	maxK2Pairs := 0 // Disabled for integration tests (disk space constraint)
 	k2Count := 0
+
+	// Group single units by name for efficient lookup
+	type unitRef struct {
+		sql     string
+		isUpper bool
+	}
+	unitsByMutationName := make(map[string][]unitRef)
+	for _, u := range singleUnits {
+		if u.Err == nil {
+			unitsByMutationName[u.Name] = append(unitsByMutationName[u.Name], unitRef{sql: u.Sql, isUpper: u.IsUpper})
+		}
+	}
+
 	for i := 0; i < len(singleUnits) && k2Count < maxK2Pairs; i++ {
 		if singleUnits[i].Err != nil {
 			continue
 		}
+		sqlI := singleUnits[i].Sql
+
 		for j := i + 1; j < len(singleUnits) && k2Count < maxK2Pairs; j++ {
 			if singleUnits[j].Err != nil {
 				continue
@@ -208,32 +232,42 @@ func MutateAll(sql string, seed int64) *MutateResult {
 			if singleUnits[i].IsUpper != singleUnits[j].IsUpper {
 				continue
 			}
-			// Skip if same mutation name (likely same node type, high conflict risk)
+			// Skip if same mutation name (high conflict risk on same AST fields)
 			if singleUnits[i].Name == singleUnits[j].Name {
 				continue
 			}
-			// Try to re-mutate the first mutation's result with the second mutation
-			k2Result := MutateAll(singleUnits[i].Sql, seed+int64(j))
-			if k2Result.Err != nil {
-				continue
-			}
-			// Find a matching mutation in the re-parsed result
-			for _, k2Unit := range k2Result.MutateUnits {
-				if k2Unit.Err != nil {
+
+			// Get or cache CalCandidates for the first mutation's SQL
+			cached, ok := k2SqlCache[sqlI]
+			if !ok {
+				v2, err2 := CalCandidates(sqlI)
+				if err2 != nil {
 					continue
 				}
-				if k2Unit.Name == singleUnits[j].Name {
-					mutateResult.MutateUnits = append(mutateResult.MutateUnits, &MutateUnit{
-						Name: singleUnits[i].Name + "+" + singleUnits[j].Name,
-						Sql: k2Unit.Sql,
-						IsUpper: singleUnits[i].IsUpper,
-						Err: nil,
-						ExecResult: nil,
-					})
-					k2Count++
-					break
-				}
+				cached = &cachedCandidates{root: v2.Root, candidates: v2.Candidates}
+				k2SqlCache[sqlI] = cached
 			}
+
+			// Look for mutation j's name in cached candidates
+			candsJ, exists := cached.candidates[singleUnits[j].Name]
+			if !exists || len(candsJ) == 0 {
+				continue
+			}
+
+			// Apply the second mutation on the cached AST (no re-parse!)
+			newSql, err2 := ImpoMutate(cached.root, candsJ[0], seed+int64(j))
+			if err2 != nil {
+				continue
+			}
+
+			mutateResult.MutateUnits = append(mutateResult.MutateUnits, &MutateUnit{
+				Name:       singleUnits[i].Name + "+" + singleUnits[j].Name,
+				Sql:        newSql,
+				IsUpper:    singleUnits[i].IsUpper,
+				Err:        nil,
+				ExecResult: nil,
+			})
+			k2Count++
 		}
 	}
 

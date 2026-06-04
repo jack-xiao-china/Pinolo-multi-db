@@ -1,6 +1,7 @@
 package connector
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
 	"github.com/pkg/errors"
@@ -56,7 +57,9 @@ func (ogConn *OpenGaussConnector) ExecSQL(sqlStr string) *Result {
 		Err:         nil,
 	}
 
-	rows, err := ogConn.db.Query(sqlStr)
+	ctx, cancel := context.WithTimeout(context.Background(), DefaultQueryTimeout)
+	defer cancel()
+	rows, err := ogConn.db.QueryContext(ctx, sqlStr)
 	if err != nil {
 		result.Err = errors.Wrap(err, "[OpenGaussConnector.ExecSQL]query error")
 		return result
@@ -98,7 +101,7 @@ func (ogConn *OpenGaussConnector) ExecSQL(sqlStr string) *Result {
 		rowData := make([]string, len(columns))
 		for i, v := range values {
 			if v == nil {
-				rowData[i] = "NULL"
+				rowData[i] = NullMarker
 			} else {
 				rowData[i] = fmt.Sprintf("%v", v)
 			}
