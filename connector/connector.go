@@ -25,6 +25,7 @@ type Connector struct {
 
 // NewConnector: create Connector. CREATE DATABASE IF NOT EXISTS dbname + USE dbname when dbname != ""
 func NewConnector(host string, port int, username string, password string, dbname string) (*Connector, error) {
+	// First, create a connection without database to create the database
 	dsn := fmt.Sprintf("%s:%s@tcp(%s:%d)/%s?allowOldPasswords=true",
 		username, password, host, port, "")
 	db, err := sql.Open("mysql", dsn)
@@ -45,11 +46,18 @@ func NewConnector(host string, port int, username string, password string, dbnam
 		if result.Err != nil {
 			return nil, result.Err
 		}
-		// USE conn.DbName
-		result = conn.ExecSQL("USE " + conn.DbName)
-		if result.Err != nil {
-			return nil, result.Err
+		// Close the connection without database
+		conn.db.Close()
+
+		// Create a new connection with the database name in the DSN
+		// This ensures all connections in the pool have the database selected
+		dsn = fmt.Sprintf("%s:%s@tcp(%s:%d)/%s?allowOldPasswords=true",
+			username, password, host, port, dbname)
+		db, err = sql.Open("mysql", dsn)
+		if err != nil {
+			return nil, errors.Wrap(err, "[NewConnector]open dsn with database error")
 		}
+		conn.db = db
 	}
 	return conn, nil
 }
