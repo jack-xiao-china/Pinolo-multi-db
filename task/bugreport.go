@@ -22,6 +22,8 @@ type BugReport struct {
 	OriginalResult *connector.Result `json:"-"`
 	MutatedSql     string            `json:"mutatedSql"`
 	MutatedResult  *connector.Result `json:"-"`
+	IsErrorOracle  bool              `json:"isErrorOracle,omitempty"` // true: error oracle detected (original OK, mutated errors)
+	ErrorMsg       string            `json:"errorMsg,omitempty"`      // error message from mutated query execution
 }
 
 func NewBugReport(bugJsonPath string) (*BugReport, error) {
@@ -43,12 +45,21 @@ func (bugReport *BugReport) ToString() string {
 	str += "**************************************************\n"
 	str += "[IsUpper] " + strconv.FormatBool(bugReport.IsUpper) + "\n"
 	str += "**************************************************\n"
-	str += "[OriginalResult]\n"
-	str += bugReport.OriginalResult.ToString() + "\n"
-	str += "**************************************************\n"
-	str += "[MutatedResult]\n"
-	str += bugReport.MutatedResult.ToString() + "\n"
-	str += "**************************************************\n"
+	if bugReport.IsErrorOracle {
+		str += "[ERROR ORACLE] Original query succeeded but mutated query failed\n"
+		str += "[ErrorMsg] " + bugReport.ErrorMsg + "\n"
+		str += "**************************************************\n"
+		str += "[OriginalResult]\n"
+		str += bugReport.OriginalResult.ToString() + "\n"
+		str += "**************************************************\n"
+	} else {
+		str += "[OriginalResult]\n"
+		str += bugReport.OriginalResult.ToString() + "\n"
+		str += "**************************************************\n"
+		str += "[MutatedResult]\n"
+		str += bugReport.MutatedResult.ToString() + "\n"
+		str += "**************************************************\n"
+	}
 	str += "\n"
 	str += "-- OriginalSql\n"
 	str += bugReport.OriginalSql + ";\n"

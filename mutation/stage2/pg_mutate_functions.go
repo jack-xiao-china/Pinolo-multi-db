@@ -608,6 +608,120 @@ func mutateCmpOpUpperInFrom(rootNode *pgquery.ParseResult, fromNode *pgquery.Nod
 	return "", false
 }
 
+// doFixMCmpOpULE_Pg: = -> <= (upper mutation, complements = -> >=)
+func doFixMCmpOpULE_Pg(rootNode *pgquery.ParseResult, node *pgquery.Node) (string, error) {
+	if rootNode == nil || len(rootNode.Stmts) == 0 {
+		return "", errors.New("[doFixMCmpOpULE_Pg]rootNode == nil || len(rootNode.Stmts) == 0")
+	}
+
+	for _, rawStmt := range rootNode.Stmts {
+		if rawStmt == nil || rawStmt.Stmt == nil {
+			continue
+		}
+		sql, err := mutateCmpOpULE(rootNode, rawStmt.Stmt)
+		if err == nil && sql != "" {
+			return sql, nil
+		}
+	}
+
+	return "", errors.New("[doFixMCmpOpULE_Pg]no = operator found for upper LE mutation")
+}
+
+func mutateCmpOpULE(rootNode *pgquery.ParseResult, stmtNode *pgquery.Node) (string, error) {
+	sel := stmtNode.GetSelectStmt()
+	if sel != nil {
+		if sel.WhereClause != nil {
+			sql, found := mutateCmpOpULEInExpr(rootNode, sel.WhereClause)
+			if found {
+				return sql, nil
+			}
+		}
+		if sel.HavingClause != nil {
+			sql, found := mutateCmpOpULEInExpr(rootNode, sel.HavingClause)
+			if found {
+				return sql, nil
+			}
+		}
+		for _, fromNode := range sel.FromClause {
+			sql, found := mutateCmpOpULEInFrom(rootNode, fromNode)
+			if found {
+				return sql, nil
+			}
+		}
+	}
+	return "", errors.New("not found")
+}
+
+func mutateCmpOpULEInExpr(rootNode *pgquery.ParseResult, exprNode *pgquery.Node) (string, bool) {
+	if exprNode == nil {
+		return "", false
+	}
+
+	aExpr := exprNode.GetAExpr()
+	if aExpr != nil && aExpr.Kind == pgquery.A_Expr_Kind_AEXPR_OP {
+		opName := getAExprOperatorName(aExpr)
+		if opName == "=" {
+			newName := []*pgquery.Node{pgquery.MakeStrNode("<=")}
+			oldName := aExpr.Name
+			aExpr.Name = newName
+			sql, err := pgquery.Deparse(rootNode)
+			aExpr.Name = oldName
+			if err == nil {
+				return sql, true
+			}
+		}
+	}
+
+	boolExpr := exprNode.GetBoolExpr()
+	if boolExpr != nil {
+		for _, arg := range boolExpr.Args {
+			sql, found := mutateCmpOpULEInExpr(rootNode, arg)
+			if found {
+				return sql, true
+			}
+		}
+	}
+
+	return "", false
+}
+
+func mutateCmpOpULEInFrom(rootNode *pgquery.ParseResult, fromNode *pgquery.Node) (string, bool) {
+	if fromNode == nil {
+		return "", false
+	}
+
+	join := fromNode.GetJoinExpr()
+	if join != nil {
+		if join.Jointype == pgquery.JoinType_JOIN_LEFT || join.Jointype == pgquery.JoinType_JOIN_RIGHT {
+			sql, found := mutateCmpOpULEInFrom(rootNode, join.Larg)
+			if found {
+				return sql, true
+			}
+			sql, found = mutateCmpOpULEInFrom(rootNode, join.Rarg)
+			if found {
+				return sql, true
+			}
+			return "", false
+		}
+		if join.Quals != nil {
+			sql, found := mutateCmpOpULEInExpr(rootNode, join.Quals)
+			if found {
+				return sql, true
+			}
+		}
+		sql, found := mutateCmpOpULEInFrom(rootNode, join.Larg)
+		if found {
+			return sql, true
+		}
+		sql, found = mutateCmpOpULEInFrom(rootNode, join.Rarg)
+		if found {
+			return sql, true
+		}
+	}
+
+	return "", false
+}
+
 // doFixMCmpOpL_Pg: >=|<= -> >|<
 // NOTE: != and <> are NOT included because != -> < has no valid containment relationship.
 func doFixMCmpOpL_Pg(rootNode *pgquery.ParseResult, node *pgquery.Node) (string, error) {

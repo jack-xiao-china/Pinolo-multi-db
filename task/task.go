@@ -207,6 +207,8 @@ type TaskResult struct {
 	// False positive monitoring (v0.4.1)
 	PotentialFalsePositivesNum int                    `json:"potentialFalsePositivesNum"` // Number of potential false positives detected
 	FalsePositiveDetails       []FalsePositiveRecord  `json:"falsePositiveDetails"`       // Detailed records of potential false positives
+	// Error Oracle (v0.6.0)
+	ErrorOracleBugsNum int `json:"errorOracleBugsNum"` // Number of Error Oracle bugs detected
 }
 
 // FalsePositiveRecord: Record detailed information about a potential false positive
@@ -533,10 +535,43 @@ func RunTask(config *TaskConfig, publicConn *connector.Connector, publicLogger *
 			// handle stage2 unit exec error
 			if mutateUnit.ExecResult.Err != nil {
 				taskResult.Stage2UnitExecErrNum += 1
-				//logger.Error("==================================================")
-				//logger.Error("[Stage2 Unit Exec Error]", "(", dmlSql.Id, "-", mutateUnit.Name, ")", mutateUnit.Sql)
-				//logger.Error(mutateUnit.ExecResult.Err)
-				//logger.Error("==================================================")
+
+				// Error Oracle (v0.6.0): if original succeeded but upper mutation errors, it may be a bug
+				// Upper mutation means mutated result should be a superset of original,
+				// so if it errors instead of returning results, that's suspicious.
+				if mutateUnit.IsUpper && originalResult.Err == nil {
+					// Re-execute to confirm reproducibility
+					reExecResult := conn.ExecSQL(mutateUnit.Sql)
+					if reExecResult.Err != nil {
+						// Confirmed: mutation consistently errors → Error Oracle bug
+						bugId := taskResult.ImpoBugsNum
+						taskResult.ImpoBugsNum += 1
+						taskResult.ErrorOracleBugsNum += 1
+
+						errMsg := mutateUnit.ExecResult.Err.Error()
+						logger.Info("ERROR ORACLE bug! bugId=", bugId, " sqlId=", dmlSql.Id,
+							" mutation=", mutateUnit.Name, " error=", errMsg)
+
+						bugReport := &BugReport{
+							ReportTime:     time.Now().String(),
+							BugId:          bugId,
+							SqlId:          dmlSql.Id,
+							MutationName:   mutateUnit.Name,
+							IsUpper:        mutateUnit.IsUpper,
+							OriginalSql:    originalSql,
+							OriginalResult: originalResult,
+							MutatedSql:     mutateUnit.Sql,
+							MutatedResult:  mutateUnit.ExecResult,
+							IsErrorOracle:  true,
+							ErrorMsg:       errMsg,
+						}
+						err2 := bugReport.SaveBugReport(config.GetTaskBugsPath())
+						if err2 != nil {
+							taskResult.SaveBugErrNum += 1
+							logger.Error("save error oracle bug error: ", err2)
+						}
+					}
+				}
 				continue
 			}
 
@@ -548,7 +583,8 @@ func RunTask(config *TaskConfig, publicConn *connector.Connector, publicLogger *
 			// Implication Oracle: check containment relationship
 				check, oracleErr := oracle.Check(originalResult, mutatedResult, isUpper)
 			if oracleErr != nil {
-				return nil, oracleErr
+				logger.Warn("oracle check error for sqlId=", dmlSql.Id, " mutation=", mutationName, ": ", oracleErr)
+				continue
 			}
 			if !check {
 				// logical bug!!!

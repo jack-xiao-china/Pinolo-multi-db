@@ -1,0 +1,970 @@
+     Pinolo: Detecting Logical Bugs in Database
+      Management Systems with Approximate
+
+                         Query Synthesis
+
+ Zongyin Hao and Quanfeng Huang, School of Informatics, Xiamen University;
+      Chengpeng Wang, The Hong Kong University of Science and Technology;
+
+ Jianfeng Wang, University of Southern California; Yushan Zhang, Tencent Inc.;
+Rongxin Wu, School of Informatics, Xiamen University; Charles Zhang, The Hong
+
+                          Kong University of Science and Technology
+
+                       https://www.usenix.org/conference/atc23/presentation/hao
+
+         This paper is included in the Proceedings of the
+            2023 USENIX Annual Technical Conference.
+
+                              July 10­12, 2023 · Boston, MA, USA
+
+                                                    978-1-939133-35-9
+
+                                                      Open access to the Proceedings of the
+                                                   2023 USENIX Annual Technical Conference
+
+                                                                      is sponsored by
+PINOLO: Detecting Logical Bugs in Database Management Systems
+                    with Approximate Query Synthesis
+
+Zongyin Hao1, Quanfeng Huang1, Chengpeng Wang2, Jianfeng Wang3, Yushan Zhang4, Rongxin Wu1, Charles Zhang2
+
+           1School of Informatics, Xiamen University, 2The Hong Kong University of Science and Technology,
+                                          3University of Southern California, 4Tencent Inc.
+
+                      {haozongyin, huangquanfeng}@stu.xmu.edu.cn, {cwangch, charlesz}@cse.ust.hk,
+                                             jianfenw@usc.edu, wurongxin@xmu.edu.cn
+
+                        Abstract                                  of bug, logical bugs would cause DBMSs to return an incor-
+                                                                  rect result set for a given query but can easily go unnoticed
+   DBMSs (Database Management Systems) are essential in           by developers since they would not behave with apparent
+modern enterprise software. Thus, ensuring the correctness        manifestations like system crash.
+of DBMSs is critical for enterprise applications. Among vari-
+ous kinds of bugs, logical bugs, which make a DBMS return            The predominant approach to detecting logical bugs con-
+an incorrect result set for a given SQL query, are the most       sists of various automatic testing techniques. However, design-
+challenging for detection since they typically do not result in   ing effective automatic testing techniques is non-trivial. One
+apparent manifestations (e.g., crashes) and are likely to go un-  of the fundamental technical challenges is to characterize a
+noticed by users. The key challenge of detecting logical bugs     correct result concerning a given query for comparison, which
+is the test oracle problem, i.e., how to automatically charac-    is a classical problem in testing, i.e., test oracle problem [12].
+terize the expected results for a given query. The state-of-the-  To tackle this challenge, researchers have proposed various
+art approaches focus on generating the equivalent forms of        ways to obtain the test oracle. The first category is based on
+queries via the customized rules, which rewrite a seed query      differential testing [39]. It provides the same generated SQL
+to achieve the equivalent transformation. This dramatically       query to multiple DBMSs for execution and resorts to the
+limits the forms of SQL queries fed to the DBMS and thus          querying results to construct the test oracle. More concretely,
+leads to the under-reporting of many deeply-hidden logical        the inconsistency among the result sets returned by differ-
+bugs. In this paper, we propose a novel approach, PINOLO,         ent DBMSs indicates the presence of a potential logical bug.
+to constructing a test oracle for logical bugs. Instead of gen-   However, as pointed out by the existing studies [34, 36, 39],
+erating the equivalent mutants of a seed query, our idea is       differential testing cannot be applied when a generated SQL
+to synthesize the queries that theoretically should return a      query cannot comply with the grammar of all selected DBMSs
+superset or a subset of the result set of the seed query, form-   or contains operations that have different semantics between
+ing the over-approximations or under-approximations of the        different DBMSs. Although all the DBMSs support the com-
+seed query. A logical bug is detected if the result set returned  mon core syntax of SQL, each of them provides various ex-
+by our synthesized query does not follow the expected ap-         tensions and forms its own dialect [39], which dramatically
+proximation relation. We implemented our idea as a DBMS           limits the generality of differential testing.
+testing system and evaluated it on four widely-used DBMSs:
+MySQL, MariaDB, TiDB, and OceanBase. By the time of                  The second category is the oracle-guided synthesis ap-
+writing, PINOLO has found 41 unique logical bugs in these         proach [36], which does not rely on multiple DBMSs and
+DBMSs, 39 of which have been confirmed by developers.             thus mitigates the limitation of differential testing. It first
+                                                                  specifies a randomly-selected row in a database table, namely,
+1 Introduction                                                    pivot row, as the test oracle and then synthesizes the query
+                                                                  whose result set should contain this pivot row. The failure of
+Database Management Systems (DBMSs) are widely used               fetching the row with the synthesized query evidences a po-
+as a key component in modern enterprise software. Their           tential bug underlying the tested DBMS. However, since such
+correctness and reliability are critical for many enterprise ap-  an approach considers only one row each time and the synthe-
+plications, such as online banking, e-shopping, e-payment, etc.   sis merely focuses on the where clause generation, it would
+Therefore, DBMS testing has attracted considerable attention      miss logical bugs in various scenarios [34, 35]. For example,
+in the industry [14, 23, 38, 41] and academia [10, 34­36]. For    those rows that are duplicated to the pivot row are wrongly
+example, fuzzing, a widely-used testing technique, has been       fetched or omitted, or the values processed by performing
+extensively applied to DBMSs [14, 38], showing its effective-     operators on the original row data are mistakenly computed
+ness in detecting crash bugs. However, as another typical kind    and returned. Moreover, as pointed out by some recent stud-
+                                                                  ies [34, 35], the synthesis requires domain knowledge of the
+    Corresponding author: Rongxin Wu (wurongxin@xmu.edu.cn)       database dialect's supported operators and functions, and thus
+                                                                  the implementation effort is high.
+
+USENIX Association                                                2023 USENIX Annual Technical Conference 345
+   The third category is the metamorphic testing based ap-         PINOLO is more effective in detecting logical bugs. During
+proach [34, 35]. It first transforms a given query q into an-      the 24-hour run, PINOLO can find 41 unique logical bugs,
+other query q such that their querying results satisfy a specific  while the three state-of-the-art approaches together can only
+relation, which is referred to as a metamorphic relation. The      discover 14 bugs. Upon the submission, 39 out of 41 bugs
+violation of the metamorphic relation upon the querying re-        have been confirmed by developers, showing the great impact
+sults indicates the wrong result of evaluating q or q. For         of PINOLO on the four real-world DBMSs. In summary, this
+example, TLP [35] decomposes a query q into three parti-           paper makes the following contributions:
+tioning sub-queries, each of which computes the result sets
+for a boolean predicate to be evaluated as TRUE, FALSE, and           · We introduce the concept of the approximation relation
+NULL, respectively, and then constructs an equivalent query q            and a series of approximate mutators to resolve the test
+by performing the union operation on these three sub-queries.            oracle problem in testing logical bugs in DBMSs.
+NOREC [34] transforms an optimized version of a query into
+a non-optimized one by the customized rule, e.g., changing            · We propose a systematic metamorphic testing based ap-
+"SELECT * FROM t WHERE p" into "SELECT (p IS TRUE)                       proach PINOLO to detecting logical bugs in DBMSs,
+FROM t." Compared with the aforementioned two categories                 which leverages the approximate mutators to synthesize
+of approaches, metamorphic testing based approaches are                  approximate queries for a seed query.
+much more lightweight to implement and have been proven
+to be more effective in detecting logical bugs [34, 35]. How-         · We implement our idea as a DBMS testing system
+ever, existing studies instantiate the metamorphic relations as          and systematically evaluate it using four widely-used
+equivalent relations, which are still insufficient to detect many        DBMSs. The evaluation results demonstrate the effec-
+deeply-hidden bugs. This is because it is highly possible that,          tiveness of PINOLO in detecting logical bugs.
+owing to the limited search space of mutations, the pair of
+equivalent queries would still share common buggy operators        2 Background
+and functions and eventually return the same results. In such
+a case, the oracle from the equivalent query cannot provide        As discussed in § 1, this paper focuses on finding logical bugs
+any hint to detect logical bugs.                                   in the DBMSs. This section provides several preliminaries
+                                                                   as the background, including the concept of the DBMS, the
+   In this work, we present a new metamorphic testing based        logical bugs in the DBMSs, and the metamorphic testing
+approach, named PINOLO, to detect logical bugs. Our idea to        based approaches for DBMS testing.
+instantiate the metamorphic relation originates from the obser-
+vation that the querying result of a given query is essentially a  2.1 Database Management Systems
+multi-set of tuples. The inclusion relation between the multi-
+sets, which is the foundation of set theory, is a good choice to   The DBMSs are widely used in many modern software sys-
+characterize the metamorphic relation of two queries. There-       tems. They enable the developers to perform various data
+fore, we try to mutate a given seed query to obtain the queries    manipulations, namely insertion, removal, update and search,
+over or under-approximating it, of which the querying results      according to their demands. Here, we concentrate on the rela-
+are the superset or the subset of the one of the seed query.       tional DBMSs in our work as our target, which are one typical
+Based on the approximation relations, we can reveal a logical      kind of DBMSs. Basically, they are developed on top of the
+bug if the actual results violate the approximation relation. To   relational model (RM) [7], where data is organized as a col-
+systematically synthesize the two kinds of mutants, we intro-      lection of tables. Each table is essentially a relation storing
+duce a series of approximate mutators, e.g., strengthening or      the records inserted by the developers, which is a multi-set of
+weakening the predicates in where clauses, and propose an ap-      tuples from a mathematical perspective. Finally, a database
+proximate query synthesis algorithm to generate the queries        in the DBMS consists of one or more tables, storing the data
+that have the over and under-approximation relations with          in a relational manner. In this paper, we use the DBMSs to
+the seed queries. Benefiting from our approximation relation       indicate the relational DBMSs without introducing ambiguity.
+and flexible approximate mutators, PINOLO can seize more
+opportunities to reveal logical bugs, as it can perform more          There have been an increasing number of DBMSs re-
+aggressive mutations over the seed queries (e.g., discarding       leased by the industry and academia, including MySQL, Mari-
+several functions), which explore the mutants of a seed query      aDB, TiDB, and OceanBase [9, 22, 26, 29]. To interact with
+thoroughly. We also prove the correctness of our test oracle       DBMSs, SQL [3], which is the most commonly used domain-
+to solidify the theoretical foundation of PINOLO.                  specific language to store and operate data, was proposed.
+                                                                   When retrieving data, developers write SQL queries and send
+   We implemented our idea as a DBMS testing system and            them to DBMSs to get querying results. Each querying result
+evaluated it using four widely-used and comprehensively            is a multi-set of tuples indicating specific attributes of queried
+tested DBMSs, including MySQL, MariaDB, TiDB, and                  records in the tables. Overall, DBMSs provide an intuitive and
+OceanBase. Compared with the state-of-the-art approaches,          flexible way to store and retrieve information, promoting the
+                                                                   prosperity of database-backed applications in the real world.
+
+346 2023 USENIX Annual Technical Conference                        USENIX Association
+          --create a table                                          2.3 Metamorphic Testing
+          CREATE TABLE t ( c1 FLOAT );
+          INSERT INTO t VALUES (-1);                                Recent years have witnessed tremendous efforts in resolv-
+                                                                    ing the test oracle for logical bug detection in the DBMSs.
+          -- queries                                                Notably, the metamorphic testing based approach has been
+          (SELECT 1 FROM t WHERE COT(0.2)=0)                        recognized to be state-of-the-art in DBMS testing for logical
+          UNION ALL (SELECT (BINARY c1 | 0) FROM t);                bug detection [35, 37]. Generally, the metamorphic testing
+                                                                    based techniques attempt to construct multiple SQL queries
+           --result: {0}                                            of which the querying results have a specific relation, namely
+                                                                    a metamorphic relation. If the querying results violate the
+          (SELECT 1 FROM t WHERE TRUE)                              metamorphic relation, we can have the confidence that at least
+          UNION ALL (SELECT (BINARY c1 | 0) FROM t);                one of the queries triggers a logical bug in the tested DBMS.
+                                                                    For example, NOREC [34] transforms a query into a form in
+           --result: {18446744074709551615, 1}                      which the DBMS does not apply optimizations, which yields
+                                                                    the test oracle that the two queries should make the tested
+          (SELECT 1 FROM t WHERE FALSE)                             DBMS return the same result. Besides, TLP [35] gets the
+          UNION ALL (SELECT (BINARY c1 | 0) FROM t);                equivalent query result by splitting the input query into several
+                                                                    sub-queries and merging the results of sub-queries into one.
+           --result: {18446744074709551615}                         When adapting the metamorphic testing, they take randomly-
+                                                                    generated queries as the seed queries and then transform them
+    Figure 1: An example of a logical bug in OceanBase.             into other queries to ensure the metamorphic relations, which
+                                                                    automates the testing process for logical bug detection.
+2.2 Logical Bugs in DBMSs
+                                                                       Unfortunately, the existing effort has not resolved the test
+With the prevalent usage of DBMSs in real-world industrial          oracle problem perfectly. To the best of our knowledge, pre-
+scenarios, their reliability and correctness have recently been     vious studies only leverage the equivalent transformations,
+paid increasingly more attention. As complex software sys-          which are supported by the tested DBMS or conducted by
+tems, DBMSs can have bugs that cause crashes and other              their approaches, leaving the functions and operators in the
+unexpected behaviors. Remarkably, the logical bugs are one          query unchanged. This greatly limits their approaches to ex-
+of the most tricky bugs underlying the DBMSs. When a de-            ploring the code of the tested DBMSs and thus reduces the
+veloper writes a SQL query and executes it upon a database,         chance of finding logical bugs. For example, the logical bug
+the returned result may be erroneous, which means that the          shown in Figure 1 can not be revealed by NOREC [34] and
+semantics of the query is not correctly evaluated.                  TLP [35], as the transformations preserve all the operators
+                                                                    and the functions, still triggering the buggy evaluation pro-
+   Figure 1 shows a logical bug in OceanBase [25]. We sim-          cess. To improve the capability of the metamorphic testing in
+plify the creation of the table for better demonstration. Specifi-  finding logical bugs in the DBMSs, we propose a new DBMS
+cally, the first query selects the constant value 1 from the table  testing approach in this work, which relaxes the equivalence
+t if the cotangent of 0.2 is equal to 0, while the second and the   relation with a less restrictive metamorphic relation, finally
+third queries replace the predicates in the where clauses with      supporting finding more insightful logical bugs.
+1 and 0, respectively. Obviously, the querying result of the
+first query should be a subset of the one of the second query,      3 Approximate Query Synthesis
+and meanwhile, it subsumes the querying result of the third
+one. However, the actual querying results do not conform to         We propose the approximate query synthesis technique
+such inclusion relations. As confirmed by the developers of         PINOLO1 for detecting logical bugs in the DBMSs. Basi-
+OceanBase, the querying result of the first query is incorrect,     cally, our insight comes from the intuition that the mutation
+which is caused by the simultaneous usage of the set operator       of specific grammatical constructs can induce the approxi-
+UNION ALL and the functions COT and BINARY.                         mation relation between the original query and the mutated
+                                                                    one, which can be adopted as the oracle of DBMS testing.
+   As shown by the above example, logical bugs are more             Specifically, we start from a randomly generated seed query
+mysterious than system crashes, which have apparent man-            and mutate several constructs, such as predicates in where
+ifestations. In contrast, people are often unaware of logical       clauses, comparison operators, and set operators. Based on the
+bugs in DBMSs. Typically, the developers of database-backed         mutation upon any seed query, we can successfully synthesize
+applications may realize the abnormal data retrieved from the
+database, while they are still uncertain whether their applica-         1Pinolo is the English name of a cartoon character named Pinocchio.
+tion is wrongly implemented or a logical bug of the DBMS            Once he tells a lie, his nose will become longer. The relative change in its
+is triggered. Therefore, detecting a logical bug in the DBMS        length is the evidence to verify whether he is lying.
+has been typically recognized as a problem with both high
+impact and significant technical challenges.
+
+USENIX Association                                                  2023 USENIX Annual Technical Conference 347
+ Populate database   Generate initial     Synthesize over-approximate and under-approximate  Evaluate queries on the  Check the inclusion
+tables randomly     seed queries
+                                         queries by mutating the seed query                  database with the DBMS relation of querying results
+t1: C0 C1            q1
+                         SELECT c1           q2                              q3              q1  q2  q3
+          12               FROM t1
+          2 -1            WHERE                                                                          
+                           NOT (c1 > 0)
+t2: C2 C3                                                                                                
+
+-1  1
+
+-4  2
+
+                                         Over-approximate queries Under-approximate queries              Back to  and iterate
+
+                                         Figure 2: The workflow of PINOLO
+
+a series of queries, of which the return results are the superset            Relation R := t | q | r1  r2 | r1 JOIN r2
+or the subset of the result of the seed query. If the seed query                Query Q := q1  q2 | SELECT a FROM r (WHERE p)? |
+and a synthesized query do not produce the results with the ex-                               SELECT DISTINCT a FROM r (WHERE p)?
+pected inclusion relation, we safely conclude the existence of                    Pred P := b | ec | p IS b | p IS NOT b
+a bug underlying the DBMS. This section presents the system                                   | p1 AND p2 | p1 OR p2 | NOT p
+design of PINOLO to show how it resolves the oracle problem                    CExpr Ec := ea1  ea2 | ea  ALL(r) | ea  ANY(r)
+in detecting logical bugs in the DBMS and demonstrates the                     AExpr Ea := n | c | ea1  ea2 | f (ea)
+details of mutation-based query synthesis.                                        SOp  := UNION | UNION ALL | INTERSECT | MINUS
+                                                                                 COp  := > | < |  |  | == | =
+3.1 Approach Overview                                                             AOp  := + | - | × | ÷ | · · ·
+                                                                                 BLit Lb := TRUE | FALSE NLit Ln := n
+We demonstrate the overall workflow of PINOLO in Figure 2.                        Attrs A := c | ea | ea a
+In the pre-processing phase, we populate several tables in a                     Table T := t Attr C := c
+database by generating table records randomly, which lever-
+ages the existing DBMS random testing technique [27]. After                                Figure 3: The syntax of SQL queries
+preparing the database, PINOLO first generates a syntactically
+valid SQL query as the seed query. Then it parses the seed                   quantities. Without the loss of generality, we only instantiate
+query and traverses its AST to determine whether each gram-                  an arithmetic expression with an integer literal, an attribute,
+matical construct can be mutated. The mutations can make                     the result of an arithmetic operator, and the result of a SQL
+PINOLO synthesize several new queries of which the querying                  built-in function. Notably, we can also utilize the keywords
+results have the inclusion relation with the one of the seed                 ALL and ANY to support advanced comparison between an
+query, achieving the over or under-approximation for the seed                arithmetic expression and the numeric attributes.
+query. Based on the synthesized queries and their approxima-
+tion relation with the seed query, we further evaluate them on                  To resolve the test oracle problem in the DBMS testing,
+the populated database. Any violation of the approximation                   we follow the spirit of metamorphic testing and propose the
+relation reveals a potential logical bug of the DBMS as at                   approximation relations among the SQL queries. In what
+least one of the querying results of the seed query and the                  follows, we first formulate the concept of the approximation
+synthesized one is incorrect.                                                relation and then characterize the form of the SQL queries
+                                                                             that can have approximation relations with other queries.
+   The critical component of PINOLO is to automatically gen-
+erate the pairs of SQL queries with known approximation                      Definition 3.1. (Approximation Relation) Given a database
+relations. To show more technical details, we first propose                  D, a SQL query q1 is the over-approximation of q2 over D,
+the approximation relation for SQL queries (§ 3.2), and then                 denoted by q2 D q1, if and only if R(q2, D)  R(q1, D). Here,
+demonstrate how to synthesize the queries with approximation                 R(q, D) is the return result set of q upon the database D, which
+relations based on mutations (§ 3.3 and § 3.4). We summarize                 is essentially a multi-set.  is the inclusion relation between
+our design and highlight the advantage of PINOLO (§ 3.5).                    two multi-sets. We say q2 is the under-approximation of q1
+                                                                             over D, denoted by q1 D q2, if and only if q2 D q1.
+3.2 SQL Query Approximation
+                                                                                Intuitively, the approximation relation between two SQL
+In this work, we concentrate on the syntax of SQL queries                    queries indicates the inclusion relation of their querying re-
+shown in Figure 3. Basically, a SQL query can be a select-                   sults. If we construct a pair of SQL queries (q1, q2) such that
+from-where query or the result of the set operation upon sub-
+queries. The logical connectives and arithmetic operators
+make the query support depicting sophisticated predicates and
+
+348 2023 USENIX Annual Technical Conference                                                              USENIX Association
+q1 D q2 or q1 D q2, we can utilize the approximation rela-          Table 1: Some representative approximate mutators. Trans-
+tion as an instantiation of the metamorphic relation, which         forming the construct C1 into C2 achieves the under-
+serves as the test oracle for DBMS testing.                         approximation, while transforming the construct C2 into C1
+                                                                    achieves the over-approximation.
+Example 3.1. Assume that we have a database D = {t1},
+where the schema of t1 is (c1) and t1 = {(-1), (0), (1)}. Con-          Type               C1                       C2
+sider the following three queries.                                    Relation
+                                                                                SELECT a FROM r   SELECT DISTINCT a FROM r
+      q1 : SELECT c1 FROM t1 WHERE NOT (c1 > 0)                      Predicate   r1 UNION ALL r2              r1 UNION r2
+      q2 : SELECT c1 FROM t1 WHERE TRUE                                                                              r1
+      q3 : SELECT c1 FROM t1 WHERE NOT (c1  0)                      Comparison      r1 UNION r2
+                                                                    expression      r1 UNION r2           r1 INTERSECT r2
+The first query q1 selects all the non-positive values of the                                                r1 MINUS r2
+attribute c1 of the table named t1. The second query q2 selects                            r1
+all the values of the attribute c1. The third query q3 selects all                                               FALSE
+the values of the attribute c1 that are not large than or equal                             p                    FALSE
+to 0. Obviously, their querying results, denoted by R(q1, D),                           p IS b                   FALSE
+R(q2, D), and R(q3, D), respectively, have the relation that                         p IS NOT b
+R(q3, D)  R(q1, D)  R(q2, D), implying q3 D q1 D q2,                                    TRUE                         p
+i.e., q2 D q1 D q3.                                                                     TRUE                      p IS b
+                                                                                        TRUE                  p IS NOT b
+   To sum up, the syntax shown in Figure 3 characterizes the
+search space of constructing a pair of queries with an approx-                         ea1  ea2                 ea1 = ea2
+imation relation. Given a seed query in the syntax, we can                             ea1  ea2                 ea1 = ea2
+always obtain a query upon a smaller/larger relation or with                           ea1  ea2                 ea1 < ea2
+a stronger/weaker where clause, which induces a subset/su-                             ea1  ea2                 ea1 > ea2
+perset of the return result of the seed query, achieving the                           ea1 = ea2                ea1 < ea2
+under/over-approximation of the given seed query. Therefore,                           ea1 = ea2                ea1 > ea2
+it is feasible to automatically generate the queries that have                       e  ANY(r)                 e  ALL(r)
+the approximation relation with a specific query q by mutating
+the query q, which trims/enlarges the relation or strengthen-       logical expressions pose restrictions over relations. Therefore,
+s/weakens the predicate in the seed query. In this way, we can      we propose three categories of approximate mutators, which
+resolve the test oracle problem by synthesizing queries with        are shown in Table 1.
+approximation relations.
+                                                                       Concretely, the mutators alter the relations and predicates
+3.3 Approximate Mutators                                            in a SQL query, and meanwhile, mutate the comparison ex-
+                                                                    pressions, which are often atomic constraints in a predicate,
+Based on the key insight in § 3.2, we propose to resolve the        achieving the approximation relation between the queries be-
+test oracle problem by constructing SQL queries with the            fore and after the mutation. For each row, if we replace the
+approximation relation. Specifically, we can always obtain          SQL grammatical construct in the second column with the
+the approximation relation if we transform a query to another       one in the third column, we can obtain a query that under-
+one preserving the set inclusion relation of the relations and      approximates the original one; if we replace the one in the
+the implication relation of the predicates. According to high-      third column with the one in the second column, we can obtain
+level intuition, we propose the concept of the approximate          a new query that over-approximates the original query. Now
+mutator as follows, which is the fundamental ingredient of          we provide more explanations on the approximate mutators.
+the approximate query synthesis in § 3.4.
+                                                                       · Mutating relations. Using DISTINCT in a select-from-
+Definition 3.2. (Approximate Mutator) An approximate mu-                  where query removes the duplicate values in the query-
+tator is a mapping from a SQL query q1 to a query q2 such                 ing result, which under-approximates the original query.
+that q1 D q2 or q1 D q2.                                                  The set operator UNION ALL preserves the duplicate val-
+                                                                          ues and the operator UNION does not, so replacing the
+   Essentially, an approximate mutator transforms a SQL                   former with the latter ensures the under-approximation
+query into another such that they have the over or under-                 relation between the new query and the original one.
+approximation relation. We notice that a relation can be de-              Other mutators altering relations are fairly simple.
+rived from other relations, e.g., the results of a select-from-
+where query and set operations, while compound and atomic              · Mutating predicates. For an arbitrary predicate p, we
+                                                                          can strengthen it by mutating it to FALSE and weaken it
+                                                                          by mutating it to TRUE. The logical implication would
+                                                                          pose more or less restrictive constrain upon the tu-
+                                                                          ples in the relations, which finally achieve the under-
+                                                                          approximation or over-approximation, respectively.
+
+                                                                       · Mutating comparison expressions. For each compari-
+                                                                          son expression as an atomic constraint, we can alter its
+                                                                          comparison operator to strengthen or weaken the con-
+                                                                          straint induced by the expression. For example, replacing
+
+USENIX Association                                                  2023 USENIX Annual Technical Conference 349
+       with = makes the new expression more restrictive than        Algorithm 1: Mutation-based query synthesis
+      the original one. Also, mutating the keyword ANY with
+      ALL also induces a stronger predicate in the query.           1 Procedure synthesizeApproximateQueries(q):
+
+Example 3.2. For the simpler SQL query q1 in Example 3.1,           2   parseQuery(q) ;
+we can mutate it by replacing the negation with TRUE and
+altering > to , which yield two queries q2 and q3 that over-        3 Qover  mutate(q, , OVER) ;
+approximate q1, respectively. We can further consider a more        4 Qunder  mutate(q, , UNDER) ;
+complex SQL query as follows.                                       5 return (q, Qover, Qunder);
+                                                                    6 Procedure mutate(u, , kind):
+q : SELECT 1 FROM t1 WHERE
+                                                                    7 if kind == OVER then
+   (NOT (FROM_DAYS(1) = ALL(SELECT c1 FROM t1)))
+                                                                    8        negKind  UNDER;
+We can mutate the predicate in the where clause of q to TRUE
+to over-approximate the query q. Also, mutating ALL to ANY          9 else
+weakens the comparison expression in the negation, and thus,
+strengthens the predicate in the where clause, yielding an          10       negKind  OVER;
+under-approximation of the query q.
+                                                                    11 S  applyApproxMutator(q, , kind)  {q};
+   Notably, the approximate mutator proposed in this section
+is a general concept. The mutators shown in Table 1 are             12 if u : (r1 MINUS r2) then
+just several instances of the mutators, while we can further                 S1  mutate(r1, getAST(r1), kind);
+define more mutators to enable us to obtain the queries with        13
+approximation relations more flexibly. Actually, we provide
+a systematic framework to instantiate such mutators in these        14       S2  mutate(r2, getAST(r2), negKind);
+categories. The complete list of the instantiated mutators,
+including REGEXP and IN operators, has been published               15       S  S  {r1 MINUS r2 | r1  S1 , r2  S2 } ;
+online [31].
+                                                                    16 else if u : (NOT p) then
+3.4 Mutation-based Query Synthesis
+                                                                    17       S  mutate(p, getAST(p), negKind);
+Leveraging the approximate mutators in § 3.3, we can fi-
+nally propose the approximate query synthesis algorithm by          18       S  S  {NOT p | p  S};
+applying the mutators upon a seed query. This section demon-
+strates the technical details of the synthesis algorithm on how     19 else if u : (p IS NOT TRUE) then
+to generate two sets of SQL queries that over-approximate
+and under-approximate a seed query, respectively. We also           20       S  mutate(p, getAST(p), negKind);
+formulate our test oracle with a theorem as the theoretical
+guarantee for the approximation relations among the seed            21       S  S  {p IS NOT TRUE | p  S};
+query and the synthesized ones.
+                                                                    22 else if u : e  ALL(r) then
+   Algorithm 1 shows the mutation-based query synthesis al-
+gorithm. Initially, it takes a seed query as the input, parses      23       S  mutate(r, getAST(r), negKind);
+the query, and generates an AST of the query to facilitate
+further mutations (Line 2). Basically, it traverses the AST in a    24       S  S  {e  ALL(r) | r  S} ;
+top-down manner, during which it identifies the potential SQL
+constructs for the mutation (Line 3­Line 4). Consider synthe-       25 else
+sizing the queries that under-approximate the seed query as
+an example, where kind is set to be UNDER (Line 4). Specifi-        26         getSubASTs(u) ;
+cally, it processes each SQL construct in two ways.
+                                                                    27         ;
+   · When encountering the SQL construct (r1 MINUS r2), it
+      attempts to trim the relation r1 and enlarge the relation r2  28       foreach (v, v) in 
+      so that the difference of the two relations can be trimmed
+      (Line 12­Line 15). Similarly, it strengthens the predicate    29       [(v, v)]  mutate(v, v, kind);
+      p for (NOT p) and (p IS NOT TRUE), and also enlarges
+      the relation r for the comparison expression e  ALL(r)        30       S  S  concat(q, , ) ;
+      (Line 16­Line 24).
+                                                                    31 return S;
+
+                                                                       · For other SQL constructs, it trims each relation and
+                                                                          strengthens each predicate and comparison expression
+                                                                          appearing in the constructs. Lastly, it composes each
+                                                                          mutated constructs together by the function concat
+                                                                          to obtain the ASTs of the synthesized queries under-
+                                                                          approximating the seed query (Line 26­Line 30).
+
+                                                                    By applying the approximate mutators during the AST traver-
+                                                                    sal, Algorithm 1 finally synthesizes two sets of queries on the
+                                                                    fly, which are syntactically valid and have the approximation
+                                                                    relation with the seed query q.
+
+                                                                    Example 3.3. Consider the query q in Example 3.2 as the
+                                                                    seed query. We show how to synthesize the queries that under-
+                                                                    approximate q. After generating its AST, which is shown by
+                                                                    the leftmost tree in Figure 4, Algorithm 1 examines each SQL
+                                                                    construct in a top-down manner. When encountering the pred-
+                                                                    icate in the where clause, we can mutate the predicate, which
+                                                                    is a logical negation, to FALSE, or strengthen the predicate in
+                                                                    the logical negation. For the latter case, we can further mutate
+                                                                    the comparison expression in the negation to TRUE, mutate
+                                                                    the comparison operator with , or replace ALL with ANY,
+                                                                    which finally weakens the logical negation. Finally, we can
+
+350 2023 USENIX Annual Technical Conference                                                              USENIX Association
+SELECT                                                              =           of null values. A similar argument also holds when kind is
+                                                                                UNDER. Therefore, we can prove the approximation relation
+1 FROM WHERE        FALSE  FROM_DAYS ALL FROM_DAYS ANY                          between each synthesized query and the seed query based on
+                                                                                the principle of structural induction.
+t1      NOT                1                            SELECT   1     SELECT
+                                                                                3.5 Summary
+        =                                               c1 FROM        c1 FROM
+                                                                                PINOLO automates the DBMS testing via the approximate
+FROM_DAYS ALL       NOT                                 t1             t1       query synthesis, which discovers underlying logical bugs in
+                                                                                the DBMSs. The syntax in Figure 3 ensures the syntactical
+    1      SELECT                                                               validity of the seed queries, and furthermore, guarantees that
+                                                                                the synthesized queries have valid SQL syntax. Meanwhile,
+                    ()                                                          our approximate mutators enable us to obtain the approxima-
+                                                                                tion relation between the seed query and the synthesized ones,
+           c1 FROM                                                              which perfectly resolves the test oracle problem. Compared
+                                                                                with the existing techniques [34­36], PINOLO considers more
+               t1                                                               SQL features, such as set operators, arithmetic expressions,
+                                                  TRUE                          sub-queries, etc. The expressive syntax permits us to test the
+                                                                                DBMS more thoroughly and discover more logical bugs re-
+Figure 4: An example of synthesizing queries under-                             ported in previous studies, which will be evidenced by our
+approximating the query q                                                       experiments. Besides, the approximate operators can aggres-
+                                                                                sively mutate the seed query, which may remove the buggy
+obtain four queries that under-approximate q. Particularly,                     operators and functions, revealing the logical bugs more thor-
+one of the synthesized queries is as follows:                                   oughly than existing techniques. Lastly, it is worth noting that
+                                                                                PINOLO provides a general framework for discovering the
+q : SELECT 1 FROM t1 WHERE                                                      logical bugs in the DBMS. We can further extend the syntax
+                                                                                of SQL queries and instantiate more approximate mutators,
+    (NOT (FROM_DAYS(1)  ALL(SELECT c1 FROM t1)))                                which can promote the capability of discovering the logical
+                                                                                bugs triggered by sophisticated SQL queries.
+Fortunately, we find that R(q, D) is not subsumed by R(q, D),
+indicating that the querying result of q or q is incorrect, which               4 Implementation
+is confirmed by the developers of MySQL [21].
+                                                                                We implemented our approach PINOLO as a DBMS testing
+   It is worth mentioning that we have to restrict the values in                system, which was written in GO with 8,055 lines of code.
+the database tables not to be null. Any comparison between                      The source code of our tool is hosted in the github repository 2.
+a non-null value and a null value can introduce an unknown                      Next, we present more details of our implementation decisions
+value of the comparison expression, denoted by NULL with-                       that are important for the outcome of our experiments.
+out the ambiguity, which is smaller than TRUE but larger than
+FALSE in the logical order. However, we can notice that the                     Database population. We randomly generate the database
+predicate (p IS NULL) evaluates to FALSE, TRUE, or FALSE,                       tables by leveraging an existing tool, GO-RANDGEN [27].
+if p is TRUE, NULL, or FALSE, respectively, which indicates                     Following the best practice summarized in the prior study [36],
+that strengthening or weakening the predicate p does not al-                    we restrict the number of table records to be no more than
+ways strengthen or weaken the predicate p IS NULL. In this                      30. Besides, we randomly generate the tables with the same
+case, we cannot ensure the expected approximation relation                      attributes, which makes the join operator yield a non-trivial
+between the seed query and the synthesized queries in Qover                     result. Particularly, we avoid null values in any table, as the
+and Qunder. Formally, we state the following theorem to for-                    test oracle requires non-null values as a prerequisite, which is
+mulate our test oracle.                                                         stated in Theorem 3.1.
+
+Theorem 3.1. (Test Oracle) Assume that the database D does                      Seed query generation and parsing. To generate seed
+not contain any table storing null values. Taking the query q                   queries as the input of our synthesis algorithm, we utilize GO-
+as a seed query, Algorithm 1 can always synthesize two sets                     RANDGEN [27] to automatically produce seed SQL queries.
+of queries Qover and Qunder such that:                                          Specifically, we use the general-purpose parser generator BI-
+                                                                                SON [13] to write a context-free grammar file describing the
+   · For any q  Qover, we have q D q, i.e., q D q.                              SQL syntax with a series of production rules. We provide
+   · For any q  Qunder, we have q D q, i.e., q D q.
+                                                                                    2https://github.com/qaqcatz/impomysql.git
+   To solidify the theoretical foundation of our test oracle, we
+sketch the proof of the theorem briefly. First, the fact that
+the database tables do not contain null values implies that
+the evaluation results of any expressions, including compari-
+son expressions and predicates, are not evaluated to unknown
+values, and the intermediate relations, such as the results of
+the join and the union operator, do not contain null values.
+Second, it is trivial to prove that the approximate mutators
+applied to different constructs finally yield a weaker pred-
+icate or larger relation when kind is OVER in the absence
+
+USENIX Association                                                              2023 USENIX Annual Technical Conference 351
+this grammar file to GO-RANDGEN, so that it can generate the           · RQ2: Can PINOLO outperform the state-of-the-art logi-
+queries by searching each production rule randomly. It then               cal bug detection techniques?
+heuristically selects the terminal or non-terminal symbols to
+avoid exceeding the limitation of recursion. Moreover, we              · RQ3: How does the randomness introduced by the seed
+permit users to write embedded LUA code blocks in the gram-               query generation affect the performance of PINOLO?
+mar file to further restrict the form of seed queries, which
+can ensure the successful query execution, e.g., the number         5.1 Experiment Setup
+of columns in the two queries of UNION should be equal. To
+apply the approximate mutators to seed queries, we utilize          Environment. We conducted the experiments on one server
+another tool PINGCAP PARSER [28], which accepts the same            with 104-cores Intel(R) Xeon(R) Gold 6230R CPU @
+context-free grammar as the one for the seed query generation,      2.10GHz and 500 GB memory. The server runs Ubuntu 18.04
+to generate ASTs of seed queries for the mutation.                  system that uses Linux kernel version: 5.4.0-135-generic. To
+                                                                    ensure fair comparisons, we allocated four threads for each
+Approximate mutator instantiation. As mentioned at the              DBMS testing in our following experiments.
+end of § 3.3, we instantiate a series of approximate mutators
+for the relations, predicates, and comparison expressions in a      Tested DBMS. Our focus was on testing four widely-used and
+given query. Each approximate mutator consists of two SQL           large-scale open-source DBMSs: MySQL, MariaDB, TiDB,
+grammatical constructs, which indicate the construct after the      and OceanBase. There are two main reasons for the sub-
+over and under-approximation, respectively. To cover most           ject selection. First, these selected DBMSs are representative
+features of DBMSs, we instantiate 25 approximate mutators           DBMSs from phenomenal open-source and/or commercial
+in total, including the approximate mutators demonstrated           products: MySQL and MariaDB are the two most well-known
+in Table 1. Among them, 5, 6, and 14 approximate muta-              open-source DBMSs; OceanBase is a mature commercial
+tors correspond to the mutations of the relations, predicates,      database product from Ant Group; TiDB is developed by
+and comparison expressions, respectively. Apart from the ap-        PingCap Inc. They are also commonly used in the evaluation
+proxmiate mutator in Table 1, we also include 7 mutators            of previous studies [34­36]. Moreover, we admit and discuss
+supporting LIKE, REGEXP, IN, and BETWEEN.                           potential limitations introduced by our selection of DBMS
+                                                                    systems in § 6. Second, we chose a DBMS whose SQL syn-
+Bug report post-processing. After synthesizing queries,             tax is compatible with MySQL as an evaluation subject to
+PINOLO obtains the querying results by evaluating queries on        reduce the implementation effort. This is because, although
+the populated database in the tested DBMSs. It is noted that        our approach can be generalized to other DBMSs, the im-
+inconsistent querying results frequently occur in our testing       plementation of the seed query generation and parsing (See
+process. For example, during a 24-hour testing period, 46,772       § 4) requires a grammar file that describes the SQL syntax
+inconsistent query pairs are generated for MySQL. The large         of a tested DBMS. To obtain timely feedback from devel-
+number of such query pairs makes the process of confirming          opers, we tested the latest release versions of the selected
+and fixing bugs quite verbose. To make the testing results eas-     DBMSs: MySQL 8.0.31, MariaDB 10.11.1, TiDB 6.4.0, and
+ier to understand, we borrow the idea of delta debugging [56]       OceanBase 4.0.0.
+to localize the root cause of the inconsistent returned results of
+each query pair. Specifically, we associate each problematic        Baseline. We compared PINOLO with the three state-of-
+query pair with a release version of the under-test DBMS's          the-art logical bug detection techniques, namely PQS [36],
+code base, the earliest one where inconsistent query results        NOREC [34], and TLP [35], respectively, which correspond
+appear. We denote such release version with respect to a given      to three kinds of test oracles. Similar to our approach, these
+query pair as the bug-inducing version. Further, two bugs are       baselines also require knowledge about the SQL syntax of
+considered the same if their bug-inducing versions are the          different DBMSs for seed query generation and parsing. Un-
+same. Based on our interactions with DBMS developers, our           fortunately, their implementations cannot support all the se-
+bug reports and the release version's change lists can help         lected DBMSs. We also sought help from their authors, but
+developers pinpoint culprit updates easily.                         they still could not fix the problems before the paper submis-
+                                                                    sion. Therefore, we skipped the evaluation of the baselines on
+5 Evaluation                                                        the unsupported DBMSs. Moreover, we tried to use the same
+                                                                    random seed as the baselines. However, we found that they
+To evaluate the performance of our approach PINOLO in de-           can neither export their random seeds nor import the random
+tecting logical bugs in the popular real-world DBMSs, we            seeds provided by users. Therefore, we generated the random
+design the following research questions:                            seeds by ourselves for PINOLO. To understand the impacts
+                                                                    of the random seed query generation, we investigated how
+   · RQ1: How many logical bugs in real-world DBMSs can             PINOLO is robust to such randomness in § 5.4.
+      be detected by PINOLO?
+
+352 2023 USENIX Annual Technical Conference                         USENIX Association
+16                                                                 16                                                              12                                                              3
+
+14                                                                 14                                                              10                                                              2
+                                                                                                                                                                                                                                                           PINOLO
+12                                                                 12
+Unique Bug                                                                                                                                                                                         1
+                                                            Unique Bug1010                                                         8
+                                                                                                                         Unique Bug                                                                0
+                                                                                                                                                                                       Unique Bug    0 2 4 6 8 10 12 14 16 18 20 22 24
+8                                                                  8                                                               6
+                                                        PINOLO                                                             PINOLO                                                          PINOLO                    Testing Time(h)
+
+6                      TLP                                         6                         NoREC                                 4             TLP                                                          (d) OceanBase
+
+4                                                                  4
+
+2                                                                  2                                                               2
+
+0                                                                  0                                                               0
+  0 2 4 6 8 10 12 14 16 18 20 22 24                                  0 2 4 6 8 10 12 14 16 18 20 22 24                               0 2 4 6 8 10 12 14 16 18 20 22 24
+
+                  Testing Time(h)                                                    Testing Time(h)                                                 Testing Time(h)
+
+           (a) MySQL                                                            (b) MariaDB                                            (c) TiDB
+
+Figure 5: Comparison between PINOLO and the baselines. (a)-(d) show the number of unique logical bugs over time (24 hours)
+on each DBMS. We ignore the results of the baselines on the unsupported DBMSs and the baselines finding no bugs.
+
+Table 2: The demographics of the DBMSs under the test                                                                                 In total, PINOLO found 41 unique logical bugs in these
+                                                                                                                                   DBMSs, 39 of which have been confirmed by developers. For
+    DBMS Version GitHub Stars LOC First Release                                                                                    MySQL, TiDB, and OceanBase, all of the detected bugs have
+                                                                                                                                   been confirmed by developers. For MariaDB, twelve out of
+ MySQL     8.0.31      8.6K                                            4,766,086      1995                                         fourteen bugs have been confirmed, while the rest are still
+ MariaDB   10.11.1     4.6K                                            3,727,410      2009                                         waiting for the investigation. We sampled several bug reports
+            6.4.0      33.1K                                            985,518       2017                                         of MariaDB submitted by others and found that developers
+   TiDB     4.0.0      5.1K                                            2,722,881      2021                                         typically take a much longer time to handle the bugs. To keep
+OceanBase                                                                                                                          track of the status of our reported bugs, we release the bug
+                                                                                                                                   list in a public GitHub repository3.
+Table 3: Applicability of existing logical detection techniques
+and PINOLO for the selected DBMSs                                                                                                     Answer to RQ1: PINOLO discovers 41 unique bugs
+                                                                                                                                      on MySQL, MariaDB, TiDB, and OceanBase, 39 of
+    DBMS       PQS          NOREC                                          TLP    PINOLO                                              which have been confirmed by DBMS developers.
+
+    MySQL                                                       ×                                                                  5.3 Comparisons on Detecting Logical Bugs
+
+    MariaDB         ×                                                      ×                                                       Logical bug detection. We compared PINOLO with the three
+                                                                                                                                   state-of-the-art baselines, i.e., PQS, NOREC, and TLP. We
+    TiDB            ×                                           ×                                                                  ran all methods with a time budget of 24 hours. The compari-
+                                                                                                                                   son results are shown in Figure 5. Note that the baselines do
+    OceanBase                                                                                                                      not support all the DBMSs, and thus we only concentrated on
+                                                                                                                                   the comparison between PINOLO and the runnable baselines
+5.2 Effectiveness of PINOLO                                                                                                        with respect to each DBMS.
+
+We used PINOLO to test the latest version of MySQL, Mari-                                                                             For MySQL, PINOLO detected 14 logical bugs, while TLP
+aDB, TiDB, and OceanBase for 24 hours. Table 4 summarizes                                                                          only discovered 2 bugs. For MariaDB, PINOLO detected 14
+the results of PINOLO. The column All shows the number of                                                                          bugs, while NOREC discovered 10 bugs. For TiDB, PINOLO
+problematic query pairs that induce unexpected results, which                                                                      detected 11 bugs, while TLP only discovered 2 bugs. For
+indicate the existence of logical bugs. As we can see, PINOLO                                                                      OceanBase, PINOLO can detect 2 bugs, while the baselines
+discovered a large number of problematic query pairs, rang-                                                                        cannot find any. We also manually verified the overlap in the
+ing from 4,675 to 46,772 for the tested DBMSs. However,                                                                            bugs detected by PINOLO and the baselines. For MariaDB,
+we found that most of these pairs can be attributed to the                                                                         4 out of 10 bugs detected by NOREC can also be found by
+same bug. To relieve the developers from the heavy burden                                                                          PINOLO. For TiDB, 1 out of 2 bugs detected by TLP can also
+of checking the duplicate bugs, we leverage the bug-inducing                                                                       be found by PINOLO. There are no bugs detected by PQS.
+version to deduplicate the bugs (See § 4). The column Unique
+shows the number of bug reports after deduplication, which                                                                            Figure 5 shows the logical bug detection progress over
+is significantly smaller than the value in column All, ranging                                                                     time for PINOLO and the baselines. We found that PINOLO is
+from 2 to 14. We submitted the deduplicated bugs to the de-                                                                        more efficient in finding logical bugs compared to all of the
+velopers for confirmation. The column Verified shows the                                                                           baselines. Within one hour, PINOLO was able to detect 57.1%
+number of bug reports that have been verified by developers,                                                                       (8/14) of bugs on MySQL, 85.7% (12/14) on MariaDB, 63.6%
+ranging from 2 to 14.                                                                                                              (7/11) on TiDB and 50% (1/2) on OceanBase.
+
+Table 4: The number of logical bugs found by PINOLO.                                                                               Code coverage. To understand why PINOLO can find more
+
+    DBMS               All                                         Unique Verified                                                     3https://github.com/qaqcatz/impomysql_bugreports
+
+    MySQL              46,772                                          14         14
+
+    MariaDB            42,208                                          14         12
+
+    TiDB               5,268                                           11         11
+
+    OceanBase          4,675                                           2          2
+
+USENIX Association                                                                                                                     2023 USENIX Annual Technical Conference 353
+150                                                                      28                                                           Table 5: The numbers of the discovered logical bugs when
+                                                                                                                                      feeding different seed queries to PINOLO
+140                                                                      25
+Coverage(K)
+                                                            Coverage(K)13022
+
+120             PINOLO                                                   19                                                             DBMS     Seed1  Seed2  Seed3  Seed4  Seed5  Common
+                                                                                                                              PINOLO
+110             PQS                                                                                                                    MySQL       14     18     16     16     17       11
+                                                                         16                                                            MariaDB     14     16     13     13     13       10
+                TLP                                                                                                           NoREC                11      9     11     11     13        9
+                                                                                                                                         TiDB       2      2      2      2      2        2
+100                                                                      13                                                           OceanBase
+     0 2 4 6 8 10 12 14 16 18 20 22 24
+                                                                         10
+                   Testing Time(h)                                          0 2 4 6 8 10 12 14 16 18 20 22 24
+
+     (a) MySQL                                                                             Testing Time(h)
+
+                                                                                      (b) MariaDB
+
+Figure 6: Code coverage comparison between PINOLO and                                                                                 Table 6: Importance of the logical bugs found by PINOLO
+the three baselines over 24 hours
+                                                                                                                                                 Severity          Bug impact duration
+logical bugs than all other methods, we used GCOV [30] to                                                                               DBMS     S2 S3     <1 year 15 years 510 years
+compute the line coverage achieved by PINOLO and all oth-
+ers. Note that we are unable to provide code coverage results                                                                          MySQL     68            1      7             6
+for TiDB and OceanBase. As TiDB is developed in GO, we                                                                                 MariaDB   93
+cannot find any feasible tool to support the program instru-                                                                                     83            1      7             4
+mentation or the code coverage profile for system test 4. For                                                                            TiDB     --
+OceanBase, the instrumented binary has to be deployed by the                                                                          OceanBase                5      6             0
+specific tool OBDEPLOY [24], which breaks the functionality
+of code coverage profiling.                                                                                                                                    1      1             0
+
+   Figure 6 shows the code coverage over time for MySQL                                                                                  Figure 7 shows the progress of detecting unique logical
+and MariaDB. The results show that PINOLO achieves a                                                                                  bugs over time for the five sets of seed queries. We found that
+higher line coverage than the three baselines. For MySQL, the                                                                         the growth trend of the number of unique bugs over time is
+improvement of PINOLO over PQS and TLP is 2.2% (3,008                                                                                 similar under different sets. Table 5 shows more details about
+lines) and 4.0% (5,316 lines), respectively. For MariaDB, the                                                                         these detected logical bugs. Among the five sets of random
+improvement of PINOLO over NOREC is 12.4% (2,835 lines).                                                                              seed queries, the common bugs, of which the numbers are
+                                                                                                                                      shown in the column Common, account for an average of
+   Code coverage is well recognized as an approximation                                                                               68.4%, 72.9%, 82.9%, and 100% of the total bugs on MySQL,
+of testing capability, because a bug cannot be detected if its                                                                        MariaDB, TiDB, and OceanBase respectively. This result
+buggy code is not executed. However, larger code coverage                                                                             shows that PINOLO can find different unique logical bugs via
+does not mean more bugs. To better understand the impact of                                                                           different sets of random seed queries.
+larger code coverage achieved by PINOLO, we further inves-
+tigated whether there were some bugs whose buggy code is                                                                                 Answer to RQ3: The randomness introduced by the
+uniquely covered by PINOLO. TiDB#40015 [42] is a typical                                                                                 seed query generation does not have a significant
+example. The root cause of this bug is the improper exception                                                                            impact on the overall bug detection performance of
+handling in the function vecGetDateFromString, which has                                                                                 PINOLO. Meanwhile, the different random seed queries
+been covered by PINOLO but missed by other baselines during                                                                              can benefit PINOLO in detecting different bugs.
+the 24-hour running.
+                                                                                                                                      5.5 Discussion
+Answer to RQ2: Compared with the state-of-the-art
+techniques, PINOLO can find more unique logical bugs                                                                                  Bug Importance. To understand the importance of the bugs
+and achieve higher line coverage.                                                                                                     found by PINOLO, we investigated their severity and the im-
+                                                                                                                                      pact duration. The results are shown in Table 6. The column
+5.4 Impacts of The Seed Query Generation                                                                                              Severity indicates the severity of the bugs labeled by develop-
+                                                                                                                                      ers. Our reported bugs were classified as the levels of S2 and
+PINOLO uses GO-RANDGEN, which takes a random seed to                                                                                  S3, which represent the second and third highest severity lev-
+generate a set of seed queries. To understand whether the ran-                                                                        els, respectively. Typically, the S2 level indicates a severe loss
+domness affects the efficiency and effectiveness of PINOLO,                                                                           of service or missing significant functionality, while the S3
+we conducted the experiments which used GO-RANDGEN                                                                                    level indicates a minor loss of service or inconvenient usage.
+with five different random seeds to generate five sets of seed                                                                        Note that there is no severity level in the bug tracking system
+queries. We then ran PINOLO under each set and compared                                                                               of OceanBase, so we skipped the discussion for OceanBase.
+their performance on detecting logical bugs.                                                                                          We discovered 6, 9, and 8 bugs in the S2 level in MySQL,
+                                                                                                                                      MariaDB, and TiDB, respectively, which account for 62.2%
+    4Go 1.20 plans to cover the features of program instrumentation and code                                                          of the bugs in the three DBMSs. The bugs in the S3 level are
+coverage profile, but will be available after Feb 2023 [15].                                                                          less severe, but developers still considered them to be fixed
+
+354 2023 USENIX Annual Technical Conference                                                                                                                           USENIX Association
+20                                   18                                   14                                                                                                                       3
+
+18                                   16                                   12
+
+16                                   14
+Unique Bug
+                                                            Unique Bug141210                                                                                                                       2
+                                                                                                                         Unique Bug
+12                                                                                                                                                                                     Unique Bug
+                                     10                                   8
+10                   Seed1                                Seed1                                                                                     Seed1                                                            Seed1
+
+8                    Seed2           8                    Seed2           6             Seed2                                                                                                                        Seed2
+
+6                    Seed3           6                    Seed3           4             Seed3                                                                                                      1                 Seed3
+
+4                    Seed4           4                    Seed4                         Seed4                                                                                                                        Seed4
+
+2                    Seed5           2                    Seed5           2             Seed5                                                                                                                        Seed5
+
+0                                    0                                    0                                                                                                                        0
+  0 2 4 6 8 10 12 14 16 18 20 22 24    0 2 4 6 8 10 12 14 16 18 20 22 24    0 2 4 6 8 10 12 14 16 18 20 22 24                                                                                        0 2 4 6 8 10 12 14 16 18 20 22 24
+
+    Testing Time(h)                      Testing Time(h)                                    Testing Time(h)                                                                                                          Testing Time(h)
+
+    (a) MySQL                            (b) MariaDB                          (c) TiDB                                                                                                                (d) OceanBase
+
+    Figure 7: The number of unique logical bugs over time for each group of the random seed queries on the tested DBMSs
+
+necessarily. For example, we received an appreciation from                systems [1, 32, 43, 44]).
+the MySQL developers in one of the bug reports with the S3                   As shown in § 5.4, different random seed queries can ben-
+level: "Thank you for your contribution. It is our standpoint
+that all bugs should be fixed, whether major or minor."                   efit PINOLO in detecting different bugs. This indicates that
+                                                                          adjusting seeds dynamically is helpful to make PINOLO find
+   Table 6 also shows the bug impact duration, which is                   more bugs. Therefore, in the future, we will consider to inte-
+computed as the interval between the time of the bug-inducing             grate PINOLO into the fuzzing framework to better prioritize
+version and the bug reporting time. Surprisingly, we found                the seed selection and enhance the bug detection capability.
+that 10 (25.6%) and 21 (53.8%) of bugs have lasted for 5-
+10 and 1-5 years, respectively. Specifically, the two earliest               Another possible direction for the future exploration is bug
+bugs of MySQL [20] and MariaDB [17] can be traced back to                 deduplication. In this work, we determine whether two bugs
+2014. This result indicates that the logical bugs are typically           are duplicated by checking their bug-inducing versions. How-
+difficult and slow to be found, which is also consistent with             ever, the bug-inducing version is an approximation of root
+the findings of the prior study [35].                                     causes, which would misclassify the bugs. This is because a
+                                                                          release version of DBMS would introduce numerous bugs,
+False Positive and False Negative. According to Theo-                     which lead to multiple problematic query pairs. In the future,
+rem 3.1, PINOLO will not produce false positives in theory.               we will consider leveraging the spectrum-based fault localiza-
+However, we observe two bugs that have not been confirmed                 tion techniques or mutation testing to improve the precision
+by developers for more than five months, and thus suspect that            of discovering the root cause of the bugs, so as to improve the
+they are false positives. We manually inspected the two cases.            precision of bug deduplication.
+In one bug report, a query returns "0", while the approximated
+query returns "-0". In the other one, a query returns "0", while          6 Threats to Validity
+the approximated query returns "-0.001". Although PINOLO
+considers the above inconsistency results as bugs, developers             The threat to internal validity is primarily associated with the
+may have a higher tolerance for such inconsistencies. These               implementation of our approach. To mitigate this concern, we
+reports allowed us to refine our implementation to reduce                 have employed several DBMSs to cross-check whether the
+false positives in the future.                                            mutants generated by PINOLO accurately represented over-
+                                                                          approximations or under-approximations of the seed query.
+   In terms of false negatives, we observed 9 cases that are
+detected by the baseline approaches but cannot be detected                   The threat to external validity lies in the representative of
+by PINOLO. This is mainly due to the DBMS features that are               the evaluation subjects. Our proposed approach was evaluated
+currently not supported by PINOLO. Specifically, there are                on a restricted set of DBMSs, as explained in the evaluation
+six, two and one bugs that are related to aggregate functions,            section. As a result, the conclusion drawn in this paper may
+left/right join, and three-valued logic, respectively.                    be limited. However, we believe that it is non-trivial to detect
+                                                                          new bugs in these selected DBMSs, as they have been thor-
+Limitations and Future Work. We currently do not support                  oughly tested by SQLancer [33]. In the future, we will extend
+all features of DBMSs, such as aggregate functions, window                the implementation of PINOLO to support the evaluation of
+functions, and left/right join. This is because, these features           additional open-source and commercial DBMSs.
+may break the approximation relation (Definition 3.1). For ex-
+ample, aggregate functions typically map a set of values into             7 Related Work
+a single value (e.g., sum, average, maximum, minimum, and
+so on), and the mapped value will not preserve the inclusion              PINOLO is an unique DBMS testing system for finding logical
+relation of the original sets, thus breaking the approximation            bugs in DBMSs, but draws inspiration from several areas in
+relation. In our future work, we will design new approxima-               the literature, including DBMS testing, metamorphic testing,
+tion relations to support more features. In addition, we intend           differential testing, and grammar fuzzing.
+to explore the application of metamorphic testing in other
+system software domains (such as networking and distributed
+
+USENIX Association                                                            2023 USENIX Annual Technical Conference 355
+DBMS testing. Recent efforts on DBMS testing focus on              a specific grammar, PINOLO mutates an existing seed query
+various aspects of DBMSs. Most of them target discovering          to synthesize an approximate query. Our synthesis process
+logical bugs in the relational DBMS [34­36]. They use spe-         rewrites specific grammatical constructs in the seed query,
+cific metamorphic relations or multiple implementations as         which ensures the syntactical validity of the synthesized one.
+the oracles and generate syntactically valid SQL queries for       We do think it is also promising to utilize existing grammar
+metamorphic testing [5] or differential testing [18]. Some         fuzzing techniques to enumerate initial seed queries auto-
+also attempt to improve the coverage of the DBMSs and lever-       matically [36, 57], which can provide more opportunities for
+age fuzzing techniques to enumerate the queries in various         improving the coverage in the DBMS testing.
+forms [10, 46, 49, 57]. PINOLO uses a new design, termed
+approximate query synthesis, and does not use other DBMS           8 Conclusion
+implementations as the oracle.
+                                                                   This paper presents PINOLO, an automatic query synthesizer
+Metamorphic testing. Metamorphic testing [5] has become            for discovering logical bugs in DBMSs. Given a seed query,
+more and more popular over the past decade. It has been            PINOLO mutates specific SQL constructs and generates a
+used in testing many software systems, such as compil-             query that over-approximates or under-approximates the seed
+ers [16, 50], SMT solvers [48, 54], DBMSs [35, 36], and            query. We posit that the approximation relation provides effec-
+AI systems [2, 47, 55]. Metamorphic testing uses one type          tive guidance for discovering logical bugs underlying DBMSs.
+of metamorphic relations to compare outputs produced by            Our experimental results demonstrate the effectiveness of
+a seed input and a mutated one. As long as the two outputs         PINOLO. Benefiting from our approximate query synthesis,
+violate the specific metamorphic relation, then at least one       PINOLO discovers 41 logical bugs in four mature DBMSs. At
+of the two inputs yields a wrong result [4]. PINOLO utilizes       the time of the submission, 39 bugs have been confirmed by
+an instantiation of a metamorphic relation, i.e., the approxi-     the developers. We hope that the promising results will put
+mation relation, as an effective testing oracle for discovering    forward the study of DBMS testing, further promoting the
+logical bugs in the DBMSs. Similar to the skeleton approxi-        reliability of database-backed systems.
+mation enumeration in the SMT solver testing [54], PINOLO
+performs the over-/under-approximation of the seed queries.        Acknowledgments
+However, PINOLO has to deal with more sophisticated syntax
+and supports more flexible mutations so that more buggy op-        We thank anonymous reviewers and the shepherd for their
+erators and functions can be removed. Therefore, it is able to     insightful comments. This work is supported by the Leading-
+detect insightful logical bugs that existing approaches, such      edge Technology Program of Jiangsu Natural Science
+as NOREC [34] and TLP [35], fail to discover.                      Foundation (BK20202001), Natural Science Foundation of
+                                                                   China (62272400), and Xiamen Youth Innovation Fund
+Differential testing. Apart from metamorphic testing, differ-      (3502Z20206036).
+ential testing provides another testing paradigm for resolving
+the oracle problem in software testing [6, 40, 52, 53]. Uti-       References
+lizing another software system with the same functionality
+as an oracle implementation, differential testing techniques        [1] Kinan Dak Albab, Jonathan DiLorenzo, Stefan Heule,
+compare the system's outputs under testing and the oracle                Ali Kheradmand, Steffen Smolka, Konstantin Weitz,
+implementation and reveal potential functional bugs with the             Muhammad Timarzi, Jiaqi Gao, and Minlan Yu.
+divergent outputs. Although the techniques can generate the              Switchv: Automated sdn switch validation with p4 mod-
+inputs of the systems flexibly, they can only be applied to soft-        els. In Proceedings of the ACM SIGCOMM 2022 Confer-
+ware systems that have other implementations supporting the              ence, page 365­379, New York, NY, USA, 2022. ACM.
+same functionality, such as JVM [6], ORM frameworks [40],
+and SMT solvers [53]. We believe PINOLO and other meta-             [2] Jialun Cao, Meiziniu Li, Yeting Li, Ming Wen, Shing-
+morphic testing approaches are orthogonal to differential test-          Chi Cheung, and Haiming Chen. Semmt: A semantic-
+ing techniques, which can be applied and strengthened to each            based testing approach for machine translation systems.
+other in testing DBMSs.                                                  ACM Trans. Softw. Eng. Methodol., 31(2):1­36, 2022.
+
+Grammar fuzzing. Grammar fuzzing is used to generate in-            [3] Donald D Chamberlin and Raymond F Boyce. Sequel: A
+puts that satisfy a specific language syntax [8, 11, 19, 19].            structured english query language. In Proceedings of the
+It has been widely used in testing many real-world soft-                 1974 ACM SIGFIDET workshop on Data description,
+ware systems, such as browsers [45], compilers [51], and                 access and control, pages 249­264, 1974.
+DBMSs [36, 57]. The generated inputs can always pass the
+syntax checking of software systems, which avoids the un-           [4] Tsong Yueh Chen, S. C. Cheung, and Siu-Ming Yiu.
+necessary enumeration of the inputs in an ill form, improving            Metamorphic testing: A new approach for generating
+the effectiveness of generated inputs. Instead of relying on             next test cases. CoRR, abs/2002.12543, 2020.
+
+356 2023 USENIX Annual Technical Conference                        USENIX Association
+ [5] Tsong Yueh Chen, Fei-Ching Kuo, Huai Liu, Pak-Lok         [20] MySQL. Bug #108937 of MySQL. https://bugs.
+      Poon, Dave Towey, T. H. Tse, and Zhi Quan Zhou. Meta-          mysql.com/bug.php?id=108937, 2022. [Online; ac-
+      morphic testing: A review of challenges and opportuni-         cessed Jan-2023].
+      ties. ACM Comput. Surv., 51(1):4:1­4:27, 2018.
+                                                               [21] MySQL. Bug #109407 of MySQL. https://bugs.
+ [6] Yuting Chen, Ting Su, and Zhendong Su. Deep differ-             mysql.com/bug.php?id=109407, 2022. [Online; ac-
+      ential testing of JVM implementations. In Proceedings          cessed Jan-2023].
+      of the 41st International Conference on Software Engi-
+      neering, pages 1257­1268. IEEE / ACM, 2019.              [22] MySQL. MySQL Database. https://www.mysql.
+                                                                     com/, 2022. [Online; accessed Dec-2022].
+ [7] Edgar F Codd. A relational model of data for large
+      shared data banks. Communications of the ACM,            [23] MySQL.  The MySQL Test Framework.
+      13(6):377­387, 1970.
+                                                               https://dev.mysql.com/doc/dev/mysql-server/
+ [8] Joeri de Ruiter and Erik Poll. Protocol state fuzzing of  latest/PAGE_MYSQL_TEST_RUN.html, 2022. [Online;
+      TLS implementations. In Proceedings of 24th USENIX       accessed Dec-2022].
+      Security Symposium, pages 193­206. USENIX Associa-
+      tion, 2015.                                              [24] OceanBase. A deployer and package manager for Ocean-
+                                                                     Base. https://github.com/oceanbase/obdeploy,
+ [9] MariaDB Foundation. MariaDB Database. https:                    2022. [Online; accessed Jan-2023].
+      //mariadb.org/, 2022. [Online; accessed Dec-2022].
+                                                               [25] OceanBase. Issue #1100 of OceanBase. https://
+[10] Jingzhou Fu, Jie Liang, Zhiyong Wu, Mingzhe Wang,               github.com/oceanbase/oceanbase/issues/1100,
+      and Yu Jiang. Griffin: Grammar-free dbms fuzzing.              2022. [Online; accessed Jan-2023].
+      In The 37th IEEE/ACM International Conference on
+      Automated Software Engineering, 2022.                    [26] OceanBase. OceanBase Database. https://www.
+                                                                     oceanbase.com/, 2022. [Online; accessed Dec-2022].
+[11] Patrice Godefroid, Adam Kiezun, and Michael Y. Levin.
+      Grammar-based whitebox fuzzing. In Proceedings of        [27] PingCap. go randgen. https://github.com/
+      the ACM SIGPLAN 2008 Conference on Programming                 pingcap/go-randgen, 2022. [Online; accessed Dec-
+      Language Design and Implementation, pages 206­215.             2022].
+      ACM, 2008.
+                                                               [28] PingCap. Parser - A MySQL Compatible SQL
+[12] William E Howden. Theoretical and empirical studies             Parser. https://github.com/pingcap/tidb/tree/
+      of program testing. IEEE Transactions on Software              master/parser, 2022. [Online; accessed Jan-2023].
+      Engineering, SE-4(4):293­298, 1978.
+                                                               [29] PingCAP. TiDB Database. https://github.com/
+[13] Free Software Foundation Inc. BNU Bison. https:                 pingcap/tidb, 2022. [Online; accessed Dec-2022].
+      //www.gnu.org/software/bison/, 2022. [Online;
+      accessed Jan-2023].                                      [30] GNU Project. gcov----a Test Coverage Pro-
+                                                                     gram. https://gcc.gnu.org/onlinedocs/gcc/
+[14] Google Inc. american fuzzy lop - a security-oriented            Gcov.html, 2022. [Online; accessed Jan-2023].
+      fuzzer. https://github.com/google/AFL, 2022.
+      [Online; accessed Dec-2022].                             [31] qaqcatz. The Complete List of Instantiated Muta-
+                                                                     tors in PINOLO. https://github.com/qaqcatz/
+[15] Google Inc. Go 1.20 Release Notes. https://tip.                 impomysql_binary/blob/main/mutators.md, 2022.
+      golang.org/doc/go1.20, 2022. [Online; accessed                 [Online; accessed Jan-2023].
+      Jan-2023].
+                                                               [32] Mian Qin, Qing Zheng, Jason Lee, Bradley Settlemyer,
+[16] Vu Le, Mehrdad Afshari, and Zhendong Su. Compiler               Fei Wen, Narasimha Reddy, and Paul Gratz. Kvrangedb:
+      validation via equivalence modulo inputs. In Proceed-          Range queries for a hash-based key-value device. ACM
+      ings of the 35th ACM SIGPLAN Conference on Pro-                Trans. Storage, jan 2023.
+      gramming Language Design and Implementation, pages
+      216­226. ACM, 2014.                                      [33] Manuel Rigger. sqlancer. https://github.com/
+                                                                     sqlancer/sqlancer, 2022. [Online; accessed Jan-
+[17] MaraiaDB. Bug #30249 of MaraiaDB. https://jira.                 2023].
+      mariadb.org/browse/MDEV-30249, 2022. [Online;
+      accessed Jan-2023].                                      [34] Manuel Rigger and Zhendong Su. Detecting optimiza-
+                                                                     tion bugs in database engines via non-optimizing refer-
+[18] William M. McKeeman. Differential testing for soft-             ence engine construction. In 28th ACM Joint European
+      ware. Digit. Tech. J., 10(1):100­107, 1998.                    Software Engineering Conference and Symposium on
+                                                                     the Foundations of Software Engineering, pages 1140­
+[19] Michaël Mera. Mining constraints for grammar fuzzing.           1152. ACM, 2020.
+      In Proceedings of the 28th ACM SIGSOFT International
+      Symposium on Software Testing and Analysis, pages 415­   [35] Manuel Rigger and Zhendong Su. Finding bugs in
+      418. ACM, 2019.                                                database systems via query partitioning. Proc. ACM
+                                                                     Program. Lang., 4(OOPSLA):211:1­211:30, 2020.
+
+USENIX Association                                             2023 USENIX Annual Technical Conference 357
+[36] Manuel Rigger and Zhendong Su. Testing database           [48] Dominik Winterer, Chengyu Zhang, and Zhendong Su.
+      engines via pivoted query synthesis. In 14th USENIX            Validating SMT solvers via semantic fusion. In Pro-
+      Symposium on Operating Systems Design and Imple-               ceedings of the 41st ACM SIGPLAN International Con-
+      mentation, pages 667­682. USENIX Association, 2020.            ference on Programming Language Design and Imple-
+                                                                     mentation, pages 718­730. ACM, 2020.
+[37] Manuel Rigger and Zhendong Su. Intramorphic test-
+      ing: A new approach to the test oracle problem. In       [49] Zhiyong Wu, Jie Liang, Mingzhe Wang, Chijin Zhou,
+      Proceedings of the 2022 ACM SIGPLAN International              and Yu Jiang. Unicorn: detect runtime errors in time-
+      Symposium on New Ideas, New Paradigms, and Reflec-             series databases with hybrid input synthesis. In 31st
+      tions on Programming and Software, pages 128­136.              ACM SIGSOFT International Symposium on Software
+      ACM, 2022.                                                     Testing and Analysis, pages 251­262. ACM, 2022.
+
+[38] Andreas Seltenreich. SQLsmith: A random SQL query         [50] Dongwei Xiao, Zhibo Liu, Yuanyuan Yuan, Qi Pang,
+      generator. https://github.com/anse1/sqlsmith,                  and Shuai Wang. Metamorphic testing of deep learn-
+      2022. [Online; accessed Dec-2022].                             ing compilers. Proc. ACM Meas. Anal. Comput. Syst.,
+                                                                     6(1):15:1­15:28, 2022.
+[39] Donald R Slutz. Massive stochastic testing of sql. In
+      VLDB, volume 98, pages 618­622. Citeseer, 1998.          [51] Haoran Xu, Shuhui Fan, Yongjun Wang, Zhijian Huang,
+                                                                     Hongzuo Xu, and Peidai Xie. Tree2tree structural lan-
+[40] Thodoris Sotiropoulos, Stefanos Chaliasos, Vaggelis Atl-        guage modeling for compiler fuzzing. In Algorithms
+      idakis, Dimitris Mitropoulos, and Diomidis Spinellis.          and Architectures for Parallel Processing - 20th Inter-
+      Data-oriented differential testing of object-relational        national Conference, pages 563­578. Springer, 2020.
+      mapping systems. In 43rd IEEE/ACM International
+      Conference on Software Engineering, pages 1535­1547.     [52] Yibiao Yang, Yuming Zhou, Hao Sun, Zhendong Su,
+      IEEE, 2021.                                                    Zhiqiang Zuo, Lei Xu, and Baowen Xu. Hunting for
+                                                                     bugs in code coverage tools via randomized differential
+[41] SQLite. How SQLite is Tested. https://www.sqlite.               testing. In Proceedings of the 41st International Confer-
+      org/testing.html, 2022. [Online; accessed Dec-                 ence on Software Engineering, pages 488­498. IEEE /
+      2022].                                                         ACM, 2019.
+
+[42] TiDB. Issue #40015 of TiDB. https://github.               [53] Peisen Yao, Heqing Huang, Wensheng Tang, Qingkai
+      com/pingcap/tidb/issues/40015, 2022. [Online;                  Shi, Rongxin Wu, and Charles Zhang. Fuzzing SMT
+      accessed Jan-2023].                                            solvers via two-dimensional input space exploration.
+                                                                     In Proceedings of 30th ACM SIGSOFT International
+[43] Jianfeng Wang, Tamás Lévai, Zhuojin Li, Marcos A. M.            Symposium on Software Testing and Analysis, pages
+      Vieira, Ramesh Govindan, and Barath Raghavan. Quad-            322­335. ACM, 2021.
+      rant: A cloud-deployable NF virtualization platform. In
+      Proceedings of the 13th Symposium on Cloud Comput-       [54] Peisen Yao, Heqing Huang, Wensheng Tang, Qingkai
+      ing, page 493­509, New York, NY, USA, 2022. ACM.               Shi, Rongxin Wu, and Charles Zhang. Skeletal approxi-
+                                                                     mation enumeration for SMT solver testing. In Proceed-
+[44] Jianfeng Wang, Tamás Lévai, Zhuojin Li, Marcos Au-              ings of 29th ACM Joint European Software Engineering
+      gusto M. Vieira, Ramesh Govindan, and Barath Ragha-            Conference and Symposium on the Foundations of Soft-
+      van. Galleon: Reshaping the square peg of NFV. CoRR,           ware Engineering, pages 1141­1153. ACM, 2021.
+      abs/2101.06466, 2021.
+                                                               [55] Yuanyuan Yuan, Shuai Wang, Mingyue Jiang, and
+[45] Junjie Wang, Bihuan Chen, Lei Wei, and Yang Liu. Su-            Tsong Yueh Chen. Perception matters: Detecting per-
+      perion: grammar-aware greybox fuzzing. In Proceed-             ception failures of VQA models using metamorphic
+      ings of the 41st International Conference on Software          testing. In 2021 IEEE/CVF Conference on Computer
+      Engineering, pages 724­735. IEEE / ACM, 2019.                  Vision and Pattern Recognition, pages 16908­16917.
+                                                                     Computer Vision Foundation / IEEE, 2021.
+[46] Mingzhe Wang, Zhiyong Wu, Xinyi Xu, Jie Liang, Chi-
+      jin Zhou, Huafeng Zhang, and Yu Jiang. Industry prac-    [56] Andreas Zeller. Why Programs Fail - A Guide to Sys-
+      tice of coverage-guided enterprise-level DBMS fuzzing.         tematic Debugging, 2nd Edition. Academic Press, 2009.
+      In 43rd IEEE/ACM International Conference on Soft-
+      ware Engineering: Software Engineering in Practice,      [57] Rui Zhong, Yongheng Chen, Hong Hu, Hangfan Zhang,
+      pages 328­337. IEEE, 2021.                                     Wenke Lee, and Dinghao Wu. SQUIRREL: testing
+                                                                     database management systems with language validity
+[47] Shuai Wang and Zhendong Su. Metamorphic object                  and coverage feedback. In 2020 ACM SIGSAC Confer-
+      insertion for testing object detection systems. In 35th        ence on Computer and Communications Security, pages
+      IEEE/ACM International Conference on Automated Soft-           955­970. ACM, 2020.
+      ware Engineering, pages 1053­1065. IEEE, 2020.
+
+358 2023 USENIX Annual Technical Conference                    USENIX Association
+

@@ -1,6 +1,7 @@
 package oracle
 
 import (
+	"strconv"
 	"time"
 
 	"github.com/qaqcatz/impomysql/connector"
@@ -12,7 +13,7 @@ import (
 // 2. The result difference is very small (possibly due to floating point precision)
 // 3. The mutation involves known edge cases (e.g., empty subqueries with ALL/ANY)
 type FalsePositiveDetector struct {
-	conn            *connector.Connector
+	conn            connector.SQLExecutor
 	reExecutions    int     // Number of times to re-execute for verification
 	consistencyThreshold float64 // Threshold for considering a bug consistent (0.0-1.0)
 	smallDiffThreshold int     // Threshold for "small" result difference
@@ -22,7 +23,7 @@ type FalsePositiveDetector struct {
 // reExecutions: number of times to re-execute queries (default: 3)
 // consistencyThreshold: minimum ratio of consistent reproductions (default: 0.67, i.e., 2/3)
 // smallDiffThreshold: row count difference threshold for "small" difference (default: 5)
-func NewFalsePositiveDetector(conn *connector.Connector, reExecutions int, consistencyThreshold float64, smallDiffThreshold int) *FalsePositiveDetector {
+func NewFalsePositiveDetector(conn connector.SQLExecutor, reExecutions int, consistencyThreshold float64, smallDiffThreshold int) *FalsePositiveDetector {
 	if reExecutions <= 0 {
 		reExecutions = 3
 	}
@@ -82,7 +83,7 @@ func (fpd *FalsePositiveDetector) AnalyzePotentialFalsePositive(
 	rowDiff := abs(analysis.OriginalRows - analysis.MutatedRows)
 	if rowDiff <= fpd.smallDiffThreshold && rowDiff > 0 {
 		analysis.IsPotentialFalsePositive = true
-		analysis.SuspicionReason = "Very small result difference (<= " + string(rune(fpd.smallDiffThreshold)) + " rows)"
+		analysis.SuspicionReason = "Very small result difference (<= " + strconv.Itoa(fpd.smallDiffThreshold) + " rows)"
 	}
 
 	// Check 2: Known edge cases for specific mutations
@@ -130,7 +131,7 @@ func (fpd *FalsePositiveDetector) AnalyzePotentialFalsePositive(
 			analysis.SuspicionReason += "; "
 		}
 		analysis.SuspicionReason += "Bug not consistently reproduced (" +
-			string(rune(analysis.ConsistentCount)) + "/" + string(rune(analysis.TotalExecutions)) + " times)"
+			strconv.Itoa(analysis.ConsistentCount) + "/" + strconv.Itoa(analysis.TotalExecutions) + " times)"
 	}
 
 	return analysis, nil

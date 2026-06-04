@@ -413,7 +413,9 @@ func (v *MutateVisitor) visitIsNullExpr(in *ast.IsNullExpr, flag int) {
 	if in == nil {
 		return
 	}
-	// skip
+	// IS NULL → FALSE (lower), IS NOT NULL → TRUE (upper)
+	v.addFixMIsNullToFalseL(in, flag)
+	v.addFixMIsNotNullToTrueU(in, flag)
 }
 
 func (v *MutateVisitor) visitIsTruthExpr(in *ast.IsTruthExpr, flag int) {
@@ -488,13 +490,23 @@ func (v *MutateVisitor) visitFuncCallExpr(in *ast.FuncCallExpr, flag int) {
 	if in == nil {
 		return
 	}
+	// Recursively visit function arguments to find mutation points
+	// e.g., WHERE YEAR(date_col) = 2024, WHERE ABS(a-b) > 0
+	for _, arg := range in.Args {
+		if exprNode, ok := arg.(ast.ExprNode); ok {
+			v.visitExprNode(exprNode, flag)
+		}
+	}
 }
 
 func (v *MutateVisitor) visitFuncCastExpr(in *ast.FuncCastExpr, flag int) {
 	if in == nil {
 		return
 	}
-	// skip cast
+	// Recursively visit CAST expression: CAST(expr AS type)
+	if in.Expr != nil {
+		v.visitExprNode(in.Expr, flag)
+	}
 }
 
 func (v *MutateVisitor) visitTrimDirectionExpr(in *ast.TrimDirectionExpr, flag int) {
@@ -538,6 +550,8 @@ func (v *MutateVisitor) miningJoin(in *ast.Join, flag int) {
 func (v *MutateVisitor) miningBinaryOperationExpr(in *ast.BinaryOperationExpr, flag int) {
 	// FixMCmpOpU
 	v.addFixMCmpOpU(in, flag)
+	// FixMCmpOpULE: = → <= (upper, complements FixMCmpOpU's = → >=)
+	v.addFixMCmpOpULE(in, flag)
 	// FixMCmpOpL
 	v.addFixMCmpOpL(in, flag)
 		// FixMNullEqToLowerL: <=> -> = (implication lower)
@@ -547,6 +561,8 @@ func (v *MutateVisitor) miningBinaryOperationExpr(in *ast.BinaryOperationExpr, f
 func (v *MutateVisitor) miningCompareSubqueryExpr(in *ast.CompareSubqueryExpr, flag int) {
 	// FixMCmpOpU
 	v.addFixMCmpOpU(in, flag)
+	// FixMCmpOpULE: = → <= (upper)
+	v.addFixMCmpOpULE(in, flag)
 	// FixMCmpOpL
 	v.addFixMCmpOpL(in, flag)
 		// FixMAllToAnyU: ALL -> ANY (implication upper)
@@ -556,6 +572,10 @@ func (v *MutateVisitor) miningCompareSubqueryExpr(in *ast.CompareSubqueryExpr, f
 }
 
 func (v *MutateVisitor) miningBetweenExpr(in *ast.BetweenExpr, flag int) {
+	// NOT BETWEEN flips the containment direction (same as NOT IN, NOT LIKE, etc.)
+	if in.Not {
+		flag = flag ^ 1
+	}
 	// FixMBetweenDropUpperU: BETWEEN -> drop upper bound (implication upper)
 	v.addFixMBetweenDropUpperU(in, flag)
 	// FixMBetweenDropLowerU: BETWEEN -> drop lower bound (implication upper)

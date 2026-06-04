@@ -14,6 +14,8 @@ const (
 
 	// *ast.BinaryOperationExpr, *ast.CompareSubqueryExpr: a {>|<|=} b -> a {>=|<=|>=} b
 	FixMCmpOpU = "FixMCmpOpU"
+	// *ast.BinaryOperationExpr, *ast.CompareSubqueryExpr: a = b -> a <= b (upper)
+	FixMCmpOpULE = "FixMCmpOpULE"
 	// *ast.BinaryOperationExpr, *ast.CompareSubqueryExpr: a {>=|<=} b -> a {>|<} b
 	FixMCmpOpL = "FixMCmpOpL"
 
@@ -65,6 +67,12 @@ const (
 	FixMAllToAnyU = "FixMAllToAnyU"
 	// ANY → ALL: x > ANY(subq) → x > ALL(subq) (ANY result ⊇ ALL result)
 	FixMAnyToAllL = "FixMAnyToAllL"
+
+	// IS NULL / IS NOT NULL implication mutations
+	// IS NULL → FALSE: {rows where x IS NULL} → {} (lower: result shrinks)
+	FixMIsNullToFalseL = "FixMIsNullToFalseL"
+	// IS NOT NULL → TRUE: {rows where x IS NOT NULL} → {all rows} (upper: result expands)
+	FixMIsNotNullToTrueU = "FixMIsNotNullToTrueU"
 )
 
 // 1. --------------------------------------------------

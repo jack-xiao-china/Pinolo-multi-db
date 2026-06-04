@@ -70,6 +70,8 @@ func ImpoMutate(rootNode ast.Node, candidate *Candidate, seed int64) (string, er
 		sql, err = doFixMDistinctL(rootNode, candidate.Node)
 	case FixMCmpOpU:
 		sql, err = doFixMCmpOpU(rootNode, candidate.Node)
+	case FixMCmpOpULE:
+		sql, err = doFixMCmpOpULE(rootNode, candidate.Node)
 	case FixMCmpOpL:
 		sql, err = doFixMCmpOpL(rootNode, candidate.Node)
 	case FixMUnionAllU:
@@ -112,6 +114,11 @@ func ImpoMutate(rootNode ast.Node, candidate *Candidate, seed int64) (string, er
 		sql, err = doFixMAllToAnyU(rootNode, candidate.Node, seed)
 	case FixMAnyToAllL:
 		sql, err = doFixMAnyToAllL(rootNode, candidate.Node, seed)
+	// IS NULL / IS NOT NULL implication mutations
+	case FixMIsNullToFalseL:
+		sql, err = doFixMIsNullToFalseL(rootNode, candidate.Node)
+	case FixMIsNotNullToTrueU:
+		sql, err = doFixMIsNotNullToTrueU(rootNode, candidate.Node)
 	}
 	if err != nil {
 		return "", err
@@ -164,17 +171,69 @@ func MutateAll(sql string, seed int64) *MutateResult {
 	}
 
 	root := v.Root
+
+	// Phase 1: Single-point mutations (k=1)
+	singleUnits := make([]*MutateUnit, 0)
 	for mutationName, candidateList := range v.Candidates {
 		for _, candidate := range candidateList {
 			newSql, err := ImpoMutate(root, candidate, seed)
-			mutateResult.MutateUnits = append(mutateResult.MutateUnits, &MutateUnit{
+			unit := &MutateUnit{
 				Name: mutationName,
 				Sql: newSql,
 				IsUpper: ((candidate.U^candidate.Flag)^1) == 1,
 				Err: err,
-
 				ExecResult: nil,
-			})
+			}
+			singleUnits = append(singleUnits, unit)
+			mutateResult.MutateUnits = append(mutateResult.MutateUnits, unit)
+		}
+	}
+
+	// Phase 2: k=2 combinatorial mutations
+	// Combine pairs of mutations with the same direction (both upper or both lower)
+	// that target different AST nodes. Only combine if both succeed.
+	// Soundness: if mutated1 ⊇ original AND mutated2 ⊇ original,
+	// then applying both still gives mutated12 ⊇ original (upper).
+	maxK2Pairs := 50 // limit to avoid explosion
+	k2Count := 0
+	for i := 0; i < len(singleUnits) && k2Count < maxK2Pairs; i++ {
+		if singleUnits[i].Err != nil {
+			continue
+		}
+		for j := i + 1; j < len(singleUnits) && k2Count < maxK2Pairs; j++ {
+			if singleUnits[j].Err != nil {
+				continue
+			}
+			// Only combine same-direction mutations
+			if singleUnits[i].IsUpper != singleUnits[j].IsUpper {
+				continue
+			}
+			// Skip if same mutation name (likely same node type, high conflict risk)
+			if singleUnits[i].Name == singleUnits[j].Name {
+				continue
+			}
+			// Try to re-mutate the first mutation's result with the second mutation
+			k2Result := MutateAll(singleUnits[i].Sql, seed+int64(j))
+			if k2Result.Err != nil {
+				continue
+			}
+			// Find a matching mutation in the re-parsed result
+			for _, k2Unit := range k2Result.MutateUnits {
+				if k2Unit.Err != nil {
+					continue
+				}
+				if k2Unit.Name == singleUnits[j].Name {
+					mutateResult.MutateUnits = append(mutateResult.MutateUnits, &MutateUnit{
+						Name: singleUnits[i].Name + "+" + singleUnits[j].Name,
+						Sql: k2Unit.Sql,
+						IsUpper: singleUnits[i].IsUpper,
+						Err: nil,
+						ExecResult: nil,
+					})
+					k2Count++
+					break
+				}
+			}
 		}
 	}
 

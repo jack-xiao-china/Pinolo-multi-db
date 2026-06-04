@@ -65,6 +65,8 @@ func PgImpoMutate(rootNode *pgquery.ParseResult, candidate *PgCandidate, seed in
 		sql, err = doFixMUnionAllL_Pg(rootNode, candidate.Node)
 	case FixMCmpOpU_Pg:
 		sql, err = doFixMCmpOpU_Pg(rootNode, candidate.Node)
+	case FixMCmpOpULE_Pg:
+		sql, err = doFixMCmpOpULE_Pg(rootNode, candidate.Node)
 	case FixMCmpOpL_Pg:
 		sql, err = doFixMCmpOpL_Pg(rootNode, candidate.Node)
 	case FixMInNullU_Pg:

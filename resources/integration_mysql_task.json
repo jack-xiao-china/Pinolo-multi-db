@@ -1,0 +1,13 @@
+{
+  "outputPath": "./output",
+  "dbms": "mysql",
+  "taskId": 500,
+  "host": "127.0.0.1",
+  "port": 3306,
+  "username": "tpcc",
+  "password": "Taurus@123",
+  "dbname": "tpch",
+  "seed": 123456,
+  "ddlPath": "./resources/integration_tpch_ddl.sql",
+  "dmlPath": "./resources/tpch_dml.sql"
+}

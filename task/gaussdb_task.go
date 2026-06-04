@@ -94,7 +94,11 @@ func RunTaskGaussDB(config *TaskConfig, publicLogger *logrus.Logger) (*TaskResul
 		ImpoBugsNum:            0,
 		SaveBugErrNum:          0,
 		EndTime:                "",
+		PotentialFalsePositivesNum: 0,
+		FalsePositiveDetails:   make([]FalsePositiveRecord, 0),
 	}
+	// Create false positive detector (v0.5.0 ported to GaussDB-M)
+	fpDetector := oracle.NewFalsePositiveDetector(conn, 3, 0.67, 5)
 	// **************************************************
 	// for each sql, do:
 	total := len(dmlSqls)
@@ -151,6 +155,39 @@ func RunTaskGaussDB(config *TaskConfig, publicLogger *logrus.Logger) (*TaskResul
 			// handle stage2 unit exec error
 			if mutateUnit.ExecResult.Err != nil {
 				taskResult.Stage2UnitExecErrNum += 1
+
+				// Error Oracle (v0.6.0): if original succeeded but upper mutation errors
+				if mutateUnit.IsUpper && originalResult.Err == nil {
+					reExecResult := conn.ExecSQL(mutateUnit.Sql)
+					if reExecResult.Err != nil {
+						bugId := taskResult.ImpoBugsNum
+						taskResult.ImpoBugsNum += 1
+						taskResult.ErrorOracleBugsNum += 1
+
+						errMsg := mutateUnit.ExecResult.Err.Error()
+						logger.Info("ERROR ORACLE bug! bugId=", bugId, " sqlId=", dmlSql.Id,
+							" mutation=", mutateUnit.Name, " error=", errMsg)
+
+						bugReport := &BugReport{
+							ReportTime:     time.Now().String(),
+							BugId:          bugId,
+							SqlId:          dmlSql.Id,
+							MutationName:   mutateUnit.Name,
+							IsUpper:        mutateUnit.IsUpper,
+							OriginalSql:    originalSql,
+							OriginalResult: originalResult,
+							MutatedSql:     mutateUnit.Sql,
+							MutatedResult:  mutateUnit.ExecResult,
+							IsErrorOracle:  true,
+							ErrorMsg:       errMsg,
+						}
+						err2 := bugReport.SaveBugReport(config.GetTaskBugsPath())
+						if err2 != nil {
+							taskResult.SaveBugErrNum += 1
+							logger.Error("save error oracle bug error: ", err2)
+						}
+					}
+				}
 				continue
 			}
 
@@ -164,7 +201,8 @@ func RunTaskGaussDB(config *TaskConfig, publicLogger *logrus.Logger) (*TaskResul
 			// Implication Oracle: check containment relationship
 			check, oracleErr := oracle.Check(originalResult, mutatedResult, isUpper)
 			if oracleErr != nil {
-				return nil, oracleErr
+				logger.Warn("oracle check error for sqlId=", dmlSql.Id, " mutation=", mutationName, ": ", oracleErr)
+				continue
 			}
 			if !check {
 				// logical bug!!!
@@ -175,6 +213,33 @@ func RunTaskGaussDB(config *TaskConfig, publicLogger *logrus.Logger) (*TaskResul
 				if publicLogger != nil {
 					publicLogger.Info("task-", strconv.Itoa(config.TaskId), " detected a logical bug!!! bugId = ",
 						bugId, " sqlId = ", dmlSql.Id, " mutationName = ", mutationName)
+				}
+
+				// False positive detection (v0.5.0 ported to GaussDB-M)
+				fpAnalysis, fpErr := fpDetector.AnalyzePotentialFalsePositive(
+					originalSql, mutatedSql, isUpper, mutationName)
+				if fpErr != nil {
+					logger.Warn("False positive analysis failed for bug-", bugId, ": ", fpErr)
+				} else if fpAnalysis.IsPotentialFalsePositive {
+					taskResult.PotentialFalsePositivesNum += 1
+					fpRecord := FalsePositiveRecord{
+						BugId:           bugId,
+						SqlId:           dmlSql.Id,
+						MutationName:    mutationName,
+						OriginalSql:     originalSql,
+						MutatedSql:      mutatedSql,
+						OriginalRows:    fpAnalysis.OriginalRows,
+						MutatedRows:     fpAnalysis.MutatedRows,
+						IsUpper:         isUpper,
+						ReExecutions:    fpAnalysis.TotalExecutions,
+						ConsistentCount: fpAnalysis.ConsistentCount,
+						SuspicionReason: fpAnalysis.SuspicionReason,
+						Timestamp:       time.Now().Format(time.RFC3339),
+					}
+					taskResult.FalsePositiveDetails = append(taskResult.FalsePositiveDetails, fpRecord)
+					logger.Warn("Potential false positive detected! bugId=", bugId,
+						" reason=", fpAnalysis.SuspicionReason,
+						" consistency=", fpAnalysis.ConsistentCount, "/", fpAnalysis.TotalExecutions)
 				}
 
 				bugReport := &BugReport{

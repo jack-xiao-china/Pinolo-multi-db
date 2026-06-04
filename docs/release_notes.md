@@ -1,3 +1,35 @@
+## v0.6.0 | 2026-06-04
+- 新增：`FixMCmpOpULE` / `FixMCmpOpULE_Pg` — `= → <=` upper 变异，补全 `FixMCmpOpU` 的 `= → >=` 方向（MySQL + PG）
+- 新增：函数调用内表达式变异 — `visitFuncCallExpr` 递归遍历参数，`visitFuncCastExpr` 递归遍历 CAST 表达式，覆盖 `YEAR(d)=2024`、`ABS(a-b)>0` 等高频模式（MySQL + PG）
+- 新增：Error Oracle — upper 变异后执行报错且原始 SQL 成功时，重新执行确认后报告为逻辑 bug（全部 4 个 task runner）
+- 新增：`BugReport.IsErrorOracle` / `ErrorMsg` 字段，区分 Error Oracle 和 Implication Oracle bug
+- 新增：`TaskResult.ErrorOracleBugsNum` 统计 Error Oracle 检测到的 bug 数
+- 文档：P2/P3 优化方案 `docs/pinolo-p2p3-optimization-plan.md`
+
+## v0.5.0 | 2026-06-04
+- 修复：BetweenExpr NOT flag 缺失 — `miningBetweenExpr` 现在正确检查 `in.Not` 并翻转 flag，消除 NOT BETWEEN 假阳性（MySQL + PG）
+- 修复：TaskPool 主循环不等待 goroutine 完成 — 添加 `sync.WaitGroup`，确保结果完整性（MySQL + PG）
+- 修复：Oracle 错误不再终止整个任务 — 改为 `logger.Warn` + `continue`（全部4个 task runner）
+- 修复：`false_positive.go` 中 `string(rune())` 转换为 `strconv.Itoa()`，修复不可打印字符
+- 新增：IS NULL / IS NOT NULL 蕴含变异（`FixMIsNullToFalseL`、`FixMIsNotNullToTrueU`），覆盖高频 SQL 模式
+- 新增：k=2 组合变异 — `MutateAll` 在同方向变异间生成配对组合，搜索空间从 O(N) 扩展到 O(N²)
+- 新增：False Positive 检测器移植到 PostgreSQL、GaussDB-M、GaussDB-A task runner
+- 优化：`FalsePositiveDetector` 从 `*connector.Connector` 改为 `connector.SQLExecutor` 接口，支持所有 DBMS
+- 优化：`normalizeNumeric()` 支持科学计数法（`1e10` → `10000000000`，`1.5E-3` → `0.0015`）
+- 文档：深度架构分析报告 `docs/pinolo-deep-analysis.md`
+- 文档：整改方案 `docs/pinolo-improvement-plan.md`
+
+## v0.4.1 | 2026-06-04
+- 新增：四款 DBMS 集成测试（MySQL, PostgreSQL, GaussDB-M, GaussDB-A）使用 TPC-H v3.0.1 基准
+- 新增：PostgreSQL 专用 TPC-H DML 语法（interval '90 days' 替代 interval '90' day）
+- 新增：GaussDB-A 专用数据加载脚本（ALTER SESSION SET nls_date_format = 'YYYY-MM-DD'）
+- 新增：假阳性检测机制（FalsePositiveDetector，3轮验证，0.67阈值）
+- 测试：PostgreSQL 发现 14 个蕴含 Oracle 违规（Q6/Q17/Q19，0 误报）
+- 测试：GaussDB-M 24 变异单元 0 bugs（18/24 查询因 interval 语法执行失败）
+- 测试：GaussDB-A 0 变异单元（Oracle 兼容模式 SQL 语法不兼容）
+- 测试：MySQL 17/24 查询处理完成（Q17 关联子查询超时），0 bugs
+- 文档：集成测试报告 `docs/integration-test-report-v0.4.1.md`
+
 ## v0.4.0 | 2026-06-03
 - 架构重构：移除所有 EET (Equivalent Expression Testing) 等价变换规则，回归 Pinolo 论文核心 Implication Oracle 方法论
 - 删除：12 个 EET 等价变异（FixMAndTrueU/OrFalseL/CaseTrueU/CaseFalseL/CaseRandEq/DeMorganAnd/DeMorganOr/BetweenToCmp/CoalesceToCase/NullifToCase/ExistsToIn/InToExists）及其 PG/GaussDB-M 变体

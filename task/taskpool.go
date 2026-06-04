@@ -218,6 +218,7 @@ func RunTaskPool(config *TaskPoolConfig) (*TaskPoolResult, error) {
 		EndTime:           "",
 	}
 	// **************************************************
+	var wg sync.WaitGroup
 	for {
 
 		// wait for a free connector
@@ -248,9 +249,15 @@ func RunTaskPool(config *TaskPoolConfig) (*TaskPoolResult, error) {
 			logger.Error("task", taskId, " connector " + conn.DbName + " SELECT 1 failed, database may crash: ", result.Err)
 			break
 		} else {
-			go PrepareAndRunTask(config, logger, connPool, conn, taskPoolResult, taskId)
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				PrepareAndRunTask(config, logger, connPool, conn, taskPoolResult, taskId)
+			}()
 		}
 	}
+	// Wait for all running goroutines to finish before saving results
+	wg.Wait()
 	// save taskpool result.
 	taskPoolResult.EndTime = time.Now().String()
 	err = taskPoolResult.SaveTaskPoolResult(config.GetTaskPoolPath())
@@ -387,6 +394,7 @@ func RunTaskPoolForPostgreSQL(config *TaskPoolConfig) (*TaskPoolResult, error) {
 		EndTime:         "",
 	}
 
+	var wg sync.WaitGroup
 	for {
 		conn := connPool.WaitForFree()
 
@@ -417,9 +425,16 @@ func RunTaskPoolForPostgreSQL(config *TaskPoolConfig) (*TaskPoolResult, error) {
 			connPool.BackToPool(conn)
 			break
 		} else {
-			go PrepareAndRunTaskForPostgreSQL(config, logger, connPool, conn, taskPoolResult, taskId)
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				PrepareAndRunTaskForPostgreSQL(config, logger, connPool, conn, taskPoolResult, taskId)
+			}()
 		}
 	}
+
+	// Wait for all running goroutines to finish before saving results
+	wg.Wait()
 
 	taskPoolResult.EndTime = time.Now().String()
 	err = taskPoolResult.SaveTaskPoolResult(config.GetTaskPoolPath())

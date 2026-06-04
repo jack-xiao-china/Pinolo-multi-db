@@ -36,6 +36,8 @@ const (
 
 	// *pgquery.A_Expr (comparison): >|<|= -> >=|<=|>=
 	FixMCmpOpU_Pg = "FixMCmpOpU_Pg"
+	// *pgquery.A_Expr (comparison): = -> <= (upper, complements FixMCmpOpU_Pg's = -> >=)
+	FixMCmpOpULE_Pg = "FixMCmpOpULE_Pg"
 	// *pgquery.A_Expr (comparison): >=|<=|!= -> >|<|<
 	FixMCmpOpL_Pg = "FixMCmpOpL_Pg"
 
@@ -124,6 +126,12 @@ func (v *PgMutateVisitor) visitNode(node *pgquery.Node, flag int) {
 		v.visitSubLink(node.GetSubLink(), flag)
 		case *pgquery.Node_FuncCall:
 			v.miningFuncCall(node, flag)
+		case *pgquery.Node_TypeCast:
+			// Recurse into CAST expression: CAST(expr AS type)
+			tc := node.GetTypeCast()
+			if tc != nil && tc.Arg != nil {
+				v.visitNode(tc.Arg, flag)
+			}
 		case *pgquery.Node_CaseExpr:
 			v.visitCaseExpr(node.GetCaseExpr(), flag)
 	default:
@@ -264,8 +272,14 @@ func (v *PgMutateVisitor) visitAExpr(expr *pgquery.A_Expr, flag int) {
 		}
 	}
 		// BETWEEN -> Drop bound transformations (implication upper)
-			v.addFixMBetweenDropUpperU_Pg(expr, flag)
-			v.addFixMBetweenDropLowerU_Pg(expr, flag)
+		// NOT BETWEEN flips the containment direction
+		betweenFlag := flag
+		if expr.Kind == pgquery.A_Expr_Kind_AEXPR_NOT_BETWEEN ||
+			expr.Kind == pgquery.A_Expr_Kind_AEXPR_NOT_BETWEEN_SYM {
+			betweenFlag = flag ^ 1
+		}
+		v.addFixMBetweenDropUpperU_Pg(expr, betweenFlag)
+		v.addFixMBetweenDropLowerU_Pg(expr, betweenFlag)
 	// IS NOT DISTINCT FROM -> = (implication lower)
 		v.addFixMIsNotDistinctFromToLowerL_Pg(expr, flag)
 }
@@ -359,9 +373,19 @@ func (v *PgMutateVisitor) visitChildren(node *pgquery.Node, flag int) {
 // Mining functions - add candidates for various mutation types
 
 // miningFuncCall: add mutation candidates for function calls
+// Recursively visits function arguments to find mutation points
+// e.g., WHERE YEAR(date_col) = 2024, WHERE ABS(a-b) > 0
 func (v *PgMutateVisitor) miningFuncCall(node *pgquery.Node, flag int) {
 	if node == nil {
 		return
+	}
+	funcCall := node.GetFuncCall()
+	if funcCall == nil {
+		return
+	}
+	// Recursively visit function arguments
+	for _, arg := range funcCall.Args {
+		v.visitNode(arg, flag)
 	}
 }
 
@@ -465,6 +489,8 @@ func (v *PgMutateVisitor) miningCmpOp(expr *pgquery.A_Expr, flag int) {
 		v.addPgCandidate(FixMCmpOpU_Pg, 1, nil, flag)
 	case "=":
 		v.addPgCandidate(FixMCmpOpU_Pg, 1, nil, flag)
+		// Also add = -> <= (complements = -> >=)
+		v.addPgCandidate(FixMCmpOpULE_Pg, 1, nil, flag)
 	}
 
 	// Lower mutations: >= -> >, <= -> <

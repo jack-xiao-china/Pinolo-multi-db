@@ -120,6 +120,12 @@ func (r *exprReplacer) Leave(in ast.Node) (ast.Node, bool) {
 				r.replaced = true
 			}
 		}
+	case *ast.FuncCastExpr:
+		cast := in.(*ast.FuncCastExpr)
+		if cast.Expr == r.target {
+			cast.Expr = r.replacement
+			r.replaced = true
+		}
 	case *ast.HavingClause:
 		having := in.(*ast.HavingClause)
 		if having.Expr == r.target {

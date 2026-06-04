@@ -1,0 +1,13 @@
+{
+  "outputPath": "./output",
+  "dbms": "mysql",
+  "taskId": 100,
+  "host": "127.0.0.1",
+  "port": 3306,
+  "username": "tpcc",
+  "password": "Taurus@123",
+  "dbname": "multidb_test",
+  "seed": 123456,
+  "ddlPath": "./resources/multidb_test/ddl_mysql.sql",
+  "dmlPath": "./resources/multidb_test/dml_mysql.sql"
+}

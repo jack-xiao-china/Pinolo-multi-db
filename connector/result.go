@@ -75,6 +75,7 @@ func (result *Result) FlatRows() []string {
 
 // normalizeNumeric: normalize a numeric string to a canonical form
 // "0.0000" → "0", "1.5000" → "1.5", "4294967295.0000" → "4294967295"
+// "1e10" → "10000000000", "1.5E-3" → "0.0015"
 // Non-numeric strings are returned unchanged
 func normalizeNumeric(s string) string {
 	if len(s) == 0 {
@@ -85,6 +86,20 @@ func normalizeNumeric(s string) string {
 	ch := s[0]
 	if ch != '-' && ch != '+' && ch != '.' && (ch < '0' || ch > '9') {
 		return s
+	}
+
+	// Check for scientific notation (e.g., "1e10", "1.5E-3", "2.3e+5")
+	for i := 0; i < len(s); i++ {
+		if s[i] == 'e' || s[i] == 'E' {
+			// Try to parse as float and format without scientific notation
+			f, err := strconv.ParseFloat(s, 64)
+			if err != nil {
+				return s
+			}
+			// Format with enough precision, then strip trailing zeros
+			result := strconv.FormatFloat(f, 'f', -1, 64)
+			return result
+		}
 	}
 
 	// Check if the string is a valid number (integer or decimal)

@@ -1,0 +1,13 @@
+{
+  "outputPath": "./output",
+  "dbms": "postgresql",
+  "taskId": 501,
+  "host": "localhost",
+  "port": 5432,
+  "username": "tpcc",
+  "password": "Taurus@123",
+  "dbname": "tpch",
+  "seed": 123456,
+  "ddlPath": "./resources/integration_tpch_pg_ddl.sql",
+  "dmlPath": "./resources/tpch_dml_pg.sql"
+}

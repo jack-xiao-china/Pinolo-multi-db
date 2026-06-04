@@ -1,0 +1,13 @@
+{
+  "outputPath": "./output",
+  "dbms": "gaussdb_a",
+  "taskId": 503,
+  "host": "121.37.186.131",
+  "port": 19995,
+  "username": "sqlbuilder1",
+  "password": "huawei@123",
+  "dbname": "testa",
+  "seed": 123456,
+  "ddlPath": "./resources/tpch_ddl.sql",
+  "dmlPath": "./resources/tpch_dml_pg.sql"
+}
