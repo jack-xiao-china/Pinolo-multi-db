@@ -233,8 +233,9 @@ func formatPgNumeric(s string) string {
 		return s
 	}
 
-	// Parse integer digits
-	digits, err := strconv.ParseInt(parts[0], 10, 64)
+	// Parse integer digits using float64 to handle large values
+	// (int64 can't hold values > 9.2e18, but float64 can handle up to 1.8e308)
+	digits, err := strconv.ParseFloat(parts[0], 64)
 	if err != nil {
 		return s
 	}
@@ -249,7 +250,7 @@ func formatPgNumeric(s string) string {
 	negative := parts[2] == "true"
 
 	// Compute the value
-	value := float64(digits) * math.Pow(10, float64(exp))
+	value := digits * math.Pow(10, float64(exp))
 	if negative {
 		value = -value
 	}

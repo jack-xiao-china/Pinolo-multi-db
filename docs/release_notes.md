@@ -1,3 +1,7 @@
+## v0.7.2 | 2026-06-04
+- 修复：PG numeric 格式转换支持大整数 — `formatPgNumeric()` 使用 float64 替代 int64 解析数字，支持超过 int64 容量（9.2e18）的 PostgreSQL numeric 值
+- 集成测试验证（v0.7.2）：MySQL 0 bugs, PG 0 bugs, GaussDB-M 0 bugs, GaussDB-A 0 bugs, 全部 0 假阳性
+
 ## v0.7.1 | 2026-06-04
 - 修复：Error Oracle 假阳性过滤 — 添加 `isExpectedMutationError()` 过滤预期错误（"Subquery returns more than 1 row"、磁盘满、超时等）
 - 修复：PG `FixMWhere1U_Pg` / `FixMWhere0L_Pg` 使用 `TRUE`/`FALSE` 替代 `1`/`0`（PG 要求 boolean 类型）
