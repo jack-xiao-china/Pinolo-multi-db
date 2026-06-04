@@ -173,6 +173,14 @@ func (conn *Connector) InitDBWithDDL(ddlSqls []*EachSql) error {
 			return result.Err
 		}
 	}
+	// Re-select database after executing DDL statements
+	// DDL operations (especially CREATE TABLE) may reset the database context
+	if conn.DbName != "" {
+		result := conn.ExecSQL("USE " + conn.DbName)
+		if result.Err != nil {
+			return errors.Wrap(result.Err, "[InitDBWithDDL]re-select database error")
+		}
+	}
 	return nil
 }
 
